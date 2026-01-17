@@ -1,0 +1,16 @@
+# MSVC
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.lib
+*.exp
+
+# V8 Runtime
+icudtl.dat
+snapshot_blob.bin
+
+# Others
+.zig-cache/
+zig-out/
+*.log
