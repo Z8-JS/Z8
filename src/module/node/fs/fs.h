@@ -52,6 +52,8 @@ public:
     // Promise-based methods (for node:fs/promises)
     static void ReadFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void WriteFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void StatPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void UnlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module

@@ -73,6 +73,9 @@ v8::Local<v8::ObjectTemplate> FS::CreateTemplate(v8::Isolate* isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "stat"), v8::FunctionTemplate::New(isolate, Stat));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "unlink"), v8::FunctionTemplate::New(isolate, Unlink));
 
+    // Expose fs.promises
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "promises"), CreatePromisesTemplate(isolate));
+
     return tmpl;
 }
 
@@ -80,6 +83,8 @@ v8::Local<v8::ObjectTemplate> FS::CreatePromisesTemplate(v8::Isolate* isolate) {
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(isolate);
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readFile"), v8::FunctionTemplate::New(isolate, ReadFilePromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "writeFile"), v8::FunctionTemplate::New(isolate, WriteFilePromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "stat"), v8::FunctionTemplate::New(isolate, StatPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "unlink"), v8::FunctionTemplate::New(isolate, UnlinkPromise));
     return tmpl;
 }
 
@@ -612,17 +617,281 @@ void FS::ReadFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     });
 }
 
-void FS::WriteFile(const v8::FunctionCallbackInfo<v8::Value>& args) {}
-void FS::Stat(const v8::FunctionCallbackInfo<v8::Value>& args) {}
-void FS::Unlink(const v8::FunctionCallbackInfo<v8::Value>& args) {}
+struct WriteFileContext {
+    std::string path;
+    std::string content;
+    std::vector<char> binary_content;
+    bool is_binary = false;
+    bool is_error = false;
+    std::string error_msg;
+};
+
+void FS::WriteFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+
+    auto ctx = new WriteFileContext();
+    ctx->path = *path;
+
+    if (args[1]->IsString()) {
+        v8::String::Utf8Value content(isolate, args[1]);
+        ctx->content = *content;
+        ctx->is_binary = false;
+    } else if (args[1]->IsUint8Array()) {
+        v8::Local<v8::Uint8Array> uint8 = args[1].As<v8::Uint8Array>();
+        ctx->binary_content.resize(uint8->ByteLength());
+        uint8->CopyContents(ctx->binary_content.data(), uint8->ByteLength());
+        ctx->is_binary = true;
+    }
+
+    Task* task = new Task();
+    task->callback.Reset(isolate, cb);
+    task->is_promise = false;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<WriteFileContext*>(task->data);
+        v8::Local<v8::Value> argv[1];
+        if (ctx->is_error) {
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::ofstream file(ctx->path, std::ios::binary);
+        if (!file.is_open()) {
+            ctx->is_error = true;
+            ctx->error_msg = "Could not open file for writing";
+        } else {
+            if (ctx->is_binary) {
+                file.write(ctx->binary_content.data(), ctx->binary_content.size());
+            } else {
+                file.write(ctx->content.c_str(), ctx->content.size());
+            }
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
 void FS::WriteFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* isolate = args.GetIsolate();
     v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsString()) return;
+
     v8::Local<v8::Promise::Resolver> resolver;
     if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
     args.GetReturnValue().Set(resolver->GetPromise());
-    resolver->Resolve(context, v8::Undefined(isolate)).Check(); // Dummy for now
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    auto ctx = new WriteFileContext();
+    ctx->path = *path;
+
+    if (args[1]->IsString()) {
+        v8::String::Utf8Value content(isolate, args[1]);
+        ctx->content = *content;
+        ctx->is_binary = false;
+    } else if (args[1]->IsUint8Array()) {
+        v8::Local<v8::Uint8Array> uint8 = args[1].As<v8::Uint8Array>();
+        ctx->binary_content.resize(uint8->ByteLength());
+        uint8->CopyContents(ctx->binary_content.data(), uint8->ByteLength());
+        ctx->is_binary = true;
+    }
+
+    Task* task = new Task();
+    task->resolver.Reset(isolate, resolver);
+    task->is_promise = true;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<WriteFileContext*>(task->data);
+        auto resolver = task->resolver.Get(isolate);
+        if (ctx->is_error) {
+            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+        } else {
+            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::ofstream file(ctx->path, std::ios::binary);
+        if (!file.is_open()) {
+            ctx->is_error = true;
+            ctx->error_msg = "Could not open file for writing";
+        } else {
+            if (ctx->is_binary) {
+                file.write(ctx->binary_content.data(), ctx->binary_content.size());
+            } else {
+                file.write(ctx->content.c_str(), ctx->content.size());
+            }
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+struct StatContext {
+    std::string path;
+    bool is_error = false;
+    std::string error_msg;
+    bool follow_symlink = true;
+    std::error_code ec;
+};
+
+void FS::Stat(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+
+    auto ctx = new StatContext();
+    ctx->path = *path;
+
+    Task* task = new Task();
+    task->callback.Reset(isolate, cb);
+    task->is_promise = false;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<StatContext*>(task->data);
+        v8::Local<v8::Value> argv[2];
+        if (ctx->is_error) {
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+            argv[1] = v8::Undefined(isolate);
+        } else {
+            argv[0] = v8::Null(isolate);
+            argv[1] = FS::CreateStats(isolate, ctx->path, ctx->ec, ctx->follow_symlink);
+        }
+        (void)task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        if (!fs::exists(ctx->path, ctx->ec)) {
+            ctx->is_error = true;
+            ctx->error_msg = "ENOENT: no such file or directory";
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
 }
 
+void FS::StatPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString()) return;
+
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
+    args.GetReturnValue().Set(resolver->GetPromise());
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    auto ctx = new StatContext();
+    ctx->path = *path;
+
+    Task* task = new Task();
+    task->resolver.Reset(isolate, resolver);
+    task->is_promise = true;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<StatContext*>(task->data);
+        auto resolver = task->resolver.Get(isolate);
+        if (ctx->is_error) {
+            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+        } else {
+            resolver->Resolve(context, FS::CreateStats(isolate, ctx->path, ctx->ec, ctx->follow_symlink)).Check();
+        }
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        if (!fs::exists(ctx->path, ctx->ec)) {
+            ctx->is_error = true;
+            ctx->error_msg = "ENOENT: no such file or directory";
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+struct UnlinkContext {
+    std::string path;
+    bool is_error = false;
+    std::string error_msg;
+};
+
+void FS::Unlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+
+    auto ctx = new UnlinkContext();
+    ctx->path = *path;
+
+    Task* task = new Task();
+    task->callback.Reset(isolate, cb);
+    task->is_promise = false;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<UnlinkContext*>(task->data);
+        v8::Local<v8::Value> argv[1];
+        if (ctx->is_error) {
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        if (!fs::remove(ctx->path, ec)) {
+            ctx->is_error = true;
+            ctx->error_msg = ec ? ec.message() : "Failed to unlink file";
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+void FS::UnlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString()) return;
+
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
+    args.GetReturnValue().Set(resolver->GetPromise());
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    auto ctx = new UnlinkContext();
+    ctx->path = *path;
+
+    Task* task = new Task();
+    task->resolver.Reset(isolate, resolver);
+    task->is_promise = true;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<UnlinkContext*>(task->data);
+        auto resolver = task->resolver.Get(isolate);
+        if (ctx->is_error) {
+            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+        } else {
+            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        if (!fs::remove(ctx->path, ec)) {
+            ctx->is_error = true;
+            ctx->error_msg = ec ? ec.message() : "Failed to unlink file";
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
 } // namespace module
 } // namespace z8

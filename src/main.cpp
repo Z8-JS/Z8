@@ -50,10 +50,6 @@
 // Z8 Namespace
 namespace z8 {
 
-void TestCommitHistory() {
-    // This is a dummy function to test if GitHub commit history is preserved
-}
-
 class Runtime {
 public:
     static void Initialize(const char* exec_path) {
@@ -240,7 +236,7 @@ public:
         }
         
         // Event Loop
-        while (z8::module::Timer::HasActiveTimers() || !z8::TaskQueue::GetInstance().IsEmpty()) {
+        while (z8::module::Timer::HasActiveTimers() || !z8::TaskQueue::GetInstance().IsEmpty() || z8::ThreadPool::GetInstance().HasPendingTasks()) {
             // 1. Process Tasks from Thread Pool
             while (!z8::TaskQueue::GetInstance().IsEmpty()) {
                 z8::Task* task = z8::TaskQueue::GetInstance().Dequeue();

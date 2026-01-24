@@ -1,7 +1,9 @@
 | API                                                          | Tiến độ     |
 | ------------------------------------------------------------ | ----------- |
-| fsPromises.access(path[, mode])                              |             |
-| fsPromises.appendFile(path, data[, options])                 |             |
+| fsPromises.stat(path[, options])                             | ✅ Done     |
+| fsPromises.unlink(path)                                      | ✅ Done     |
+| fsPromises.writeFile(file, data[, options])                  | ✅ Done     |
+| fsPromises.constants                                         | ✅ Done     |
 | fsPromises.chmod(path, mode)                                 |             |
 | fsPromises.chown(path, uid, gid)                             |             |
 | fsPromises.copyFile(src, dest[, mode])                       |             |
@@ -23,14 +25,14 @@
 | fsPromises.rename(oldPath, newPath)                          |             |
 | fsPromises.rmdir(path[, options])                            |             |
 | fsPromises.rm(path[, options])                               |             |
-| fsPromises.stat(path[, options])                             |             |
+| fsPromises.stat(path[, options])                             | ✅ Done     |
 | fsPromises.statfs(path[, options])                           |             |
 | fsPromises.symlink(target, path[, type])                     |             |
 | fsPromises.truncate(path[, len])                             |             |
-| fsPromises.unlink(path)                                      |             |
+| fsPromises.unlink(path)                                      | ✅ Done     |
 | fsPromises.utimes(path, atime, mtime)                        |             |
 | fsPromises.watch(filename[, options])                        |             |
-| fsPromises.writeFile(file, data[, options])                  | 🚧 Partial  |
+| fsPromises.writeFile(file, data[, options])                  | ✅ Done     |
 | fsPromises.constants                                         | ✅ Done     |
 | fs.access(path[, mode], callback)                            |             |
 | fs.appendFile(path, data[, options], callback)               |             |
@@ -70,11 +72,11 @@
 | fs.rename(oldPath, newPath, callback)                        |             |
 | fs.rmdir(path[, options], callback)                          |             |
 | fs.rm(path[, options], callback)                             |             |
-| fs.stat(path[, options], callback)                           | 🚧 Partial  |
+| fs.stat(path[, options], callback)                           | ✅ Done     |
 | fs.statfs(path[, options], callback)                         |             |
 | fs.symlink(target, path[, type], callback)                   |             |
 | fs.truncate(path[, len], callback)                           |             |
-| fs.unlink(path, callback)                                    | 🚧 Partial  |
+| fs.unlink(path, callback)                                    | ✅ Done     |
 | fs.unwatchFile(filename[, listener])                         |             |
 | fs.utimes(path, atime, mtime, callback)                      |             |
 | fs.watch(filename[, options][, listener])                    |             |
@@ -82,7 +84,7 @@
 | fs.write(fd, buffer, offset[, length[, position]], callback) |             |
 | fs.write(fd, buffer[, options], callback)                    |             |
 | fs.write(fd, string[, position[, encoding]], callback)       |             |
-| fs.writeFile(file, data[, options], callback)                | 🚧 Partial  |
+| fs.writeFile(file, data[, options], callback)                | ✅ Done     |
 | fs.writev(fd, buffers[, position], callback)                 |             |
 | fs.accessSync(path[, mode])                                  | ✅ Done     |
 | fs.appendFileSync(path, data[, options])                     | ✅ Done     |

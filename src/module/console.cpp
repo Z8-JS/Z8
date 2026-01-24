@@ -204,6 +204,16 @@ static std::string Inspect(v8::Isolate* isolate, v8::Local<v8::Value> value, int
 
         v8::Local<v8::Object> obj = value.As<v8::Object>();
         v8::Local<v8::Context> context = isolate->GetCurrentContext();
+        
+        // Special handling for Error objects (display stack or message)
+        if (value->IsNativeError()) {
+             v8::Local<v8::Value> stack;
+             if (obj->Get(context, v8::String::NewFromUtf8Literal(isolate, "stack")).ToLocal(&stack) && stack->IsString()) {
+                 v8::String::Utf8Value stack_str(isolate, stack);
+                 return colors ? "\x1b[31m" + std::string(*stack_str) + "\x1b[0m" : *stack_str;
+             }
+        }
+
         v8::Local<v8::Array> props;
         if (!obj->GetPropertyNames(context).ToLocal(&props)) return "[Object]";
 

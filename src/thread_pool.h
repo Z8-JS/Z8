@@ -37,8 +37,13 @@ public:
         return res;
     }
 
+    bool HasPendingTasks() {
+        std::unique_lock<std::mutex> lock(queue_mutex);
+        return !tasks.empty() || active_tasks > 0;
+    }
+
 private:
-    ThreadPool(size_t threads) : stop(false) {
+    ThreadPool(size_t threads) : stop(false), active_tasks(0) {
         for(size_t i = 0; i<threads; ++i)
             workers.emplace_back([this] {
                 for(;;) {
@@ -49,8 +54,13 @@ private:
                         if(this->stop && this->tasks.empty()) return;
                         task = std::move(this->tasks.front());
                         this->tasks.pop();
+                        this->active_tasks++; 
                     }
                     task();
+                    {
+                        std::unique_lock<std::mutex> lock(this->queue_mutex);
+                        this->active_tasks--;
+                    }
                 }
             });
     }
@@ -69,6 +79,7 @@ private:
     std::mutex queue_mutex;
     std::condition_variable condition;
     bool stop;
+    int active_tasks;
 };
 
 } // namespace z8
