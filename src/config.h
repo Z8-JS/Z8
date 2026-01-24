@@ -1,0 +1,1 @@
+#define Z8_VERSION "Beta build 0.0.1"

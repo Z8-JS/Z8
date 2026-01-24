@@ -1,0 +1,9 @@
+mega_bench_tmp_*
+async_test_dir
+*.log
+Z8-app/out/
+Z8-app/z8.exe
+Z8-app/z8.lib
+Z8-app/z8.exp
+node_modules/
+.env
