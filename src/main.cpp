@@ -50,6 +50,10 @@
 // Z8 Namespace
 namespace z8 {
 
+void TestCommitHistory() {
+    // This is a dummy function to test if GitHub commit history is preserved
+}
+
 class Runtime {
 public:
     static void Initialize(const char* exec_path) {
