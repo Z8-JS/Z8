@@ -236,7 +236,8 @@ public:
         }
         
         // Event Loop
-        while (z8::module::Timer::HasActiveTimers() || !z8::TaskQueue::GetInstance().IsEmpty() || z8::ThreadPool::GetInstance().HasPendingTasks()) {
+        bool keep_running = true;
+        while (keep_running) {
             // 1. Process Tasks from Thread Pool
             while (!z8::TaskQueue::GetInstance().IsEmpty()) {
                 z8::Task* task = z8::TaskQueue::GetInstance().Dequeue();
@@ -244,6 +245,10 @@ public:
                     v8::TryCatch task_try_catch(isolate);
                     task->runner(isolate, context, task);
                     delete task;
+                    
+                    // Resume JS execution
+                    isolate->PerformMicrotaskCheckpoint();
+
                     if (task_try_catch.HasCaught()) {
                         ReportException(isolate, &task_try_catch);
                         return false;
@@ -252,18 +257,37 @@ public:
             }
 
             // 2. Process Timers
-            std::chrono::milliseconds delay = z8::module::Timer::GetNextDelay();
-            if (delay.count() > 0 && z8::TaskQueue::GetInstance().IsEmpty()) {
-                // Only sleep if no tasks were just queued
-                std::this_thread::sleep_for(std::chrono::milliseconds(std::min((long long)delay.count(), 1LL)));
+            if (z8::module::Timer::HasActiveTimers()) {
+                v8::TryCatch loop_try_catch(isolate);
+                z8::module::Timer::Tick(isolate, context);
+                isolate->PerformMicrotaskCheckpoint();
+                if (loop_try_catch.HasCaught()) {
+                    ReportException(isolate, &loop_try_catch);
+                    return false;
+                }
             }
-            
-            v8::TryCatch loop_try_catch(isolate);
-            z8::module::Timer::Tick(isolate, context);
-            
-            if (loop_try_catch.HasCaught()) {
-                ReportException(isolate, &loop_try_catch);
-                return false;
+
+            // 3. Final termination check
+            if (!z8::module::Timer::HasActiveTimers() && 
+                z8::TaskQueue::GetInstance().IsEmpty() && 
+                !z8::ThreadPool::GetInstance().HasPendingTasks()) {
+                
+                // One last check for microtasks that might have been queued
+                isolate->PerformMicrotaskCheckpoint();
+                
+                if (z8::TaskQueue::GetInstance().IsEmpty() && !z8::ThreadPool::GetInstance().HasPendingTasks()) {
+                    keep_running = false;
+                }
+            }
+
+            // 4. Wait for work (Instant Wakeup)
+            if (keep_running && z8::TaskQueue::GetInstance().IsEmpty()) {
+                std::chrono::milliseconds delay = z8::module::Timer::GetNextDelay();
+                std::chrono::milliseconds timeout(50); // Balanced polling
+                if (delay.count() >= 0) {
+                    timeout = std::chrono::milliseconds(std::min((long long)delay.count(), 50LL));
+                }
+                z8::TaskQueue::GetInstance().Wait(timeout);
             }
         }
         

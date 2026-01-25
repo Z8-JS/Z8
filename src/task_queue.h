@@ -5,6 +5,8 @@
 #include <queue>
 #include <mutex>
 #include <functional>
+#include <condition_variable>
+#include <chrono>
 
 namespace z8 {
 
@@ -27,8 +29,11 @@ public:
     }
 
     void Enqueue(Task* task) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        queue_.push(task);
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            queue_.push(task);
+        }
+        condition_.notify_one(); // Wake up Main Thread
     }
 
     Task* Dequeue() {
@@ -44,9 +49,17 @@ public:
         return queue_.empty();
     }
 
+    // New: Blocking wait for the main thread
+    void Wait(std::chrono::milliseconds timeout) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!queue_.empty()) return;
+        condition_.wait_for(lock, timeout);
+    }
+
 private:
     std::queue<Task*> queue_;
     std::mutex mutex_;
+    std::condition_variable condition_;
 };
 
 } // namespace z8
