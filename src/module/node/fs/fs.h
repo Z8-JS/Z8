@@ -51,6 +51,8 @@ public:
     static void ReaddirPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void RmdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void RenamePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void CopyFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void AccessPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Async methods (Callback-based)
     static void ReadFile(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -61,6 +63,8 @@ public:
     static void Readdir(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void Rmdir(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void Rename(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void CopyFile(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Access(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module

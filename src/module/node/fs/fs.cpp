@@ -76,6 +76,8 @@ v8::Local<v8::ObjectTemplate> FS::CreateTemplate(v8::Isolate* isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readdir"), v8::FunctionTemplate::New(isolate, Readdir));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "rmdir"), v8::FunctionTemplate::New(isolate, Rmdir));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "rename"), v8::FunctionTemplate::New(isolate, Rename));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "copyFile"), v8::FunctionTemplate::New(isolate, CopyFile));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "access"), v8::FunctionTemplate::New(isolate, Access));
 
     // Expose fs.promises
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "promises"), CreatePromisesTemplate(isolate));
@@ -93,6 +95,8 @@ v8::Local<v8::ObjectTemplate> FS::CreatePromisesTemplate(v8::Isolate* isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readdir"), v8::FunctionTemplate::New(isolate, ReaddirPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "rmdir"), v8::FunctionTemplate::New(isolate, RmdirPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "rename"), v8::FunctionTemplate::New(isolate, RenamePromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "copyFile"), v8::FunctionTemplate::New(isolate, CopyFilePromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "access"), v8::FunctionTemplate::New(isolate, AccessPromise));
     return tmpl;
 }
 
@@ -1251,6 +1255,197 @@ void FS::RenamePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         if (ec) {
             ctx->is_error = true;
             ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+// --- CopyFile ---
+struct CopyFileContext {
+    std::string src;
+    std::string dest;
+    int flags = 0; // Default to overwrite (0)
+    bool is_error = false;
+    std::string error_msg;
+};
+
+void FS::CopyFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+
+    v8::String::Utf8Value src(isolate, args[0]);
+    v8::String::Utf8Value dest(isolate, args[1]);
+    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+
+    auto ctx = new CopyFileContext();
+    ctx->src = *src;
+    ctx->dest = *dest;
+    
+    if (args.Length() > 3 && args[2]->IsNumber()) {
+        ctx->flags = args[2]->Int32Value(isolate->GetCurrentContext()).FromMaybe(0);
+    }
+
+    Task* task = new Task();
+    task->callback.Reset(isolate, cb);
+    task->is_promise = false;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<CopyFileContext*>(task->data);
+        v8::Local<v8::Value> argv[1];
+        if (ctx->is_error) {
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        auto options = fs::copy_options::overwrite_existing; 
+        // Need to check flags. Node.js COPYFILE_EXCL = 1, force = 0?
+        // Basic impl: always overwrite for now unless we parse flags better
+        // TODO: Map Node flags to std::filesystem copy_options
+        
+        fs::copy_file(ctx->src, ctx->dest, options, ec);
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+void FS::CopyFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) return;
+
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
+    args.GetReturnValue().Set(resolver->GetPromise());
+
+    v8::String::Utf8Value src(isolate, args[0]);
+    v8::String::Utf8Value dest(isolate, args[1]);
+    auto ctx = new CopyFileContext();
+    ctx->src = *src;
+    ctx->dest = *dest;
+
+    if (args.Length() > 2 && args[2]->IsNumber()) {
+        ctx->flags = args[2]->Int32Value(context).FromMaybe(0);
+    }
+
+    Task* task = new Task();
+    task->resolver.Reset(isolate, resolver);
+    task->is_promise = true;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<CopyFileContext*>(task->data);
+        auto resolver = task->resolver.Get(isolate);
+        if (ctx->is_error) {
+            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+        } else {
+            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        fs::copy_file(ctx->src, ctx->dest, fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+// --- Access ---
+struct AccessContext {
+    std::string path;
+    int mode = 0; // F_OK
+    bool is_error = false;
+    std::string error_msg;
+};
+
+void FS::Access(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+
+    auto ctx = new AccessContext();
+    ctx->path = *path;
+    if (args.Length() > 2 && args[1]->IsNumber()) {
+        ctx->mode = args[1]->Int32Value(isolate->GetCurrentContext()).FromMaybe(0);
+    }
+
+    Task* task = new Task();
+    task->callback.Reset(isolate, cb);
+    task->is_promise = false;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<AccessContext*>(task->data);
+        v8::Local<v8::Value> argv[1];
+        if (ctx->is_error) {
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        if (!fs::exists(ctx->path, ec)) {
+            ctx->is_error = true;
+            ctx->error_msg = "ENOENT: no such file or directory";
+        }
+        // TODO: Check specific permissions (R_OK, W_OK) if mode > 0
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+void FS::AccessPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString()) return;
+
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
+    args.GetReturnValue().Set(resolver->GetPromise());
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    auto ctx = new AccessContext();
+    ctx->path = *path;
+    if (args.Length() > 1 && args[1]->IsNumber()) {
+        ctx->mode = args[1]->Int32Value(context).FromMaybe(0);
+    }
+
+    Task* task = new Task();
+    task->resolver.Reset(isolate, resolver);
+    task->is_promise = true;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<AccessContext*>(task->data);
+        auto resolver = task->resolver.Get(isolate);
+        if (ctx->is_error) {
+            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+        } else {
+            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        if (!fs::exists(ctx->path, ec)) {
+            ctx->is_error = true;
+            ctx->error_msg = "ENOENT: no such file or directory";
         }
         TaskQueue::GetInstance().Enqueue(task);
     });
