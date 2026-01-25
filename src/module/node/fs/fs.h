@@ -55,6 +55,10 @@ public:
     static void AccessPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void AppendFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void RealpathPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void ChmodPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void ReadlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void SymlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void LstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Async methods (Callback-based)
     static void ReadFile(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -69,6 +73,10 @@ public:
     static void Access(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void AppendFile(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void Realpath(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Chmod(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Readlink(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Symlink(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Lstat(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module

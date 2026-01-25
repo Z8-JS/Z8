@@ -5,7 +5,7 @@
 | fsPromises.appendFile(path, data[, options])                 | ✅ Done     |
 | fsPromises.writeFile(file, data[, options])                  | ✅ Done     |
 | fsPromises.constants                                         | ✅ Done     |
-| fsPromises.chmod(path, mode)                                 |             |
+| fsPromises.chmod(path, mode)                                 | ✅ Done     |
 | fsPromises.chown(path, uid, gid)                             |             |
 | fsPromises.copyFile(src, dest[, mode])                       | ✅ Done     |
 | fsPromises.cp(src, dest[, options])                          |             |
@@ -13,7 +13,7 @@
 | fsPromises.lchown(path, uid, gid)                            |             |
 | fsPromises.lutimes(path, atime, mtime)                       |             |
 | fsPromises.link(existingPath, newPath)                       |             |
-| fsPromises.lstat(path[, options])                            |             |
+| fsPromises.lstat(path[, options])                            | ✅ Done     |
 | fsPromises.mkdir(path[, options])                            | ✅ Done     |
 | fsPromises.mkdtemp(prefix[, options])                        |             |
 | fsPromises.mkdtempDisposable(prefix[, options])              |             |
@@ -21,14 +21,14 @@
 | fsPromises.opendir(path[, options])                          |             |
 | fsPromises.readdir(path[, options])                          | ✅ Done     |
 | fsPromises.readFile(path[, options])                         | ✅ Done     |
-| fsPromises.readlink(path[, options])                         |             |
+| fsPromises.readlink(path[, options])                         | ✅ Done     |
 | fsPromises.realpath(path[, options])                         | ✅ Done     |
 | fsPromises.rename(oldPath, newPath)                          | ✅ Done     |
 | fsPromises.rmdir(path[, options])                            | ✅ Done     |
 | fsPromises.rm(path[, options])                               |             |
 | fsPromises.stat(path[, options])                             | ✅ Done     |
 | fsPromises.statfs(path[, options])                           |             |
-| fsPromises.symlink(target, path[, type])                     |             |
+| fsPromises.symlink(target, path[, type])                     | ✅ Done     |
 | fsPromises.truncate(path[, len])                             |             |
 | fsPromises.unlink(path)                                      | ✅ Done     |
 | fsPromises.utimes(path, atime, mtime)                        |             |
@@ -37,7 +37,7 @@
 | fsPromises.constants                                         | ✅ Done     |
 | fs.access(path[, mode], callback)                            | ✅ Done     |
 | fs.appendFile(path, data[, options], callback)               | ✅ Done     |
-| fs.chmod(path, mode, callback)                               |             |
+| fs.chmod(path, mode, callback)                               | ✅ Done     |
 | fs.chown(path, uid, gid, callback)                           |             |
 | fs.close(fd[, callback])                                     |             |
 | fs.copyFile(src, dest[, mode], callback)                     | ✅ Done     |
@@ -55,7 +55,7 @@
 | fs.lchown(path, uid, gid, callback)                          |             |
 | fs.lutimes(path, atime, mtime, callback)                     |             |
 | fs.link(existingPath, newPath, callback)                     |             |
-| fs.lstat(path[, options], callback)                          |             |
+| fs.lstat(path[, options], callback)                          | ✅ Done     |
 | fs.mkdir(path[, options], callback)                          | ✅ Done     |
 | fs.mkdtemp(prefix[, options], callback)                      |             |
 | fs.open(path, flags[, mode], callback)                       |             |
@@ -66,7 +66,7 @@
 | fs.read(fd, buffer[, options], callback)                     |             |
 | fs.readdir(path[, options], callback)                        | ✅ Done     |
 | fs.readFile(path[, options], callback)                       | ✅ Done     |
-| fs.readlink(path[, options], callback)                       |             |
+| fs.readlink(path[, options], callback)                       | ✅ Done     |
 | fs.readv(fd, buffers[, position], callback)                  |             |
 | fs.realpath(path[, options], callback)                       | ✅ Done     |
 | fs.realpath.native(path[, options], callback)                |             |
@@ -75,7 +75,7 @@
 | fs.rm(path[, options], callback)                             |             |
 | fs.stat(path[, options], callback)                           | ✅ Done     |
 | fs.statfs(path[, options], callback)                         |             |
-| fs.symlink(target, path[, type], callback)                   |             |
+| fs.symlink(target, path[, type], callback)                   | ✅ Done     |
 | fs.truncate(path[, len], callback)                           |             |
 | fs.unlink(path, callback)                                    | ✅ Done     |
 | fs.unwatchFile(filename[, listener])                         |             |
