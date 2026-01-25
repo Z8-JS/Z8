@@ -24,9 +24,30 @@ jobs:
 
       - name: Prepare build (Windows)
         if: matrix.os == 'windows-latest'
+        shell: pwsh
         run: |
+          $v8_url = "https://github.com/Z8-JS/v8-z8/releases/download/14.6.0.0/v8_monolith_clang_windows_x64.zip"
+          Write-Host "Downloading V8 Monolith from $v8_url..."
+          Invoke-WebRequest -Uri $v8_url -OutFile v8_monolith.zip
+
+          Write-Host "Extracting V8 Monolith..."
+          Expand-Archive -Path v8_monolith.zip -DestinationPath v8_assets -Force
+
+          # Setup libs directory
+          if (!(Test-Path "libs")) { New-Item -ItemType Directory -Path "libs" }
+
+          # Move the library to the expected location for build.ps1
+          # Assuming the lib is inside the zip, we search for it
+          $libFile = Get-ChildItem -Path v8_assets -Filter "*.lib" -Recurse | Select-Object -First 1
+          if ($libFile) {
+              Copy-Item $libFile.FullName -Destination "libs/v8_monolith.lib" -Force
+              Write-Host "✅ V8 Library ready: libs/v8_monolith.lib"
+          } else {
+              Write-Error "❌ Could not find .lib file in extracted assets!"
+              exit 1
+          }
+
           python tools/extract_shims.py
-          # Current build.ps1 handles everything, but we can also use CMake
           .\build.ps1
 
       - name: Install dependencies (Linux)
