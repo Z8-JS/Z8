@@ -12,7 +12,7 @@
 | fsPromises.glob(pattern[, options])                          |             |
 | fsPromises.lchown(path, uid, gid)                            |             |
 | fsPromises.lutimes(path, atime, mtime)                       |             |
-| fsPromises.link(existingPath, newPath)                       |             |
+| fsPromises.link(existingPath, newPath)                       | ✅ Done     |
 | fsPromises.lstat(path[, options])                            | ✅ Done     |
 | fsPromises.mkdir(path[, options])                            | ✅ Done     |
 | fsPromises.mkdtemp(prefix[, options])                        |             |
@@ -29,9 +29,9 @@
 | fsPromises.stat(path[, options])                             | ✅ Done     |
 | fsPromises.statfs(path[, options])                           |             |
 | fsPromises.symlink(target, path[, type])                     | ✅ Done     |
-| fsPromises.truncate(path[, len])                             |             |
+| fsPromises.truncate(path[, len])                             | ✅ Done     |
 | fsPromises.unlink(path)                                      | ✅ Done     |
-| fsPromises.utimes(path, atime, mtime)                        |             |
+| fsPromises.utimes(path, atime, mtime)                        | ✅ Done     |
 | fsPromises.watch(filename[, options])                        |             |
 | fsPromises.writeFile(file, data[, options])                  | ✅ Done     |
 | fsPromises.constants                                         | ✅ Done     |
@@ -54,7 +54,7 @@
 | fs.glob(pattern[, options], callback)                        |             |
 | fs.lchown(path, uid, gid, callback)                          |             |
 | fs.lutimes(path, atime, mtime, callback)                     |             |
-| fs.link(existingPath, newPath, callback)                     |             |
+| fs.link(existingPath, newPath, callback)                     | ✅ Done     |
 | fs.lstat(path[, options], callback)                          | ✅ Done     |
 | fs.mkdir(path[, options], callback)                          | ✅ Done     |
 | fs.mkdtemp(prefix[, options], callback)                      |             |
@@ -76,10 +76,10 @@
 | fs.stat(path[, options], callback)                           | ✅ Done     |
 | fs.statfs(path[, options], callback)                         |             |
 | fs.symlink(target, path[, type], callback)                   | ✅ Done     |
-| fs.truncate(path[, len], callback)                           |             |
+| fs.truncate(path[, len], callback)                           | ✅ Done     |
 | fs.unlink(path, callback)                                    | ✅ Done     |
 | fs.unwatchFile(filename[, listener])                         |             |
-| fs.utimes(path, atime, mtime, callback)                      |             |
+| fs.utimes(path, atime, mtime, callback)                      | ✅ Done     |
 | fs.watch(filename[, options][, listener])                    |             |
 | fs.watchFile(filename[, options], listener)                  |             |
 | fs.write(fd, buffer, offset[, length[, position]], callback) |             |

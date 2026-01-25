@@ -59,6 +59,9 @@ public:
     static void ReadlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void SymlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void LstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void UtimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void LinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void TruncatePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Async methods (Callback-based)
     static void ReadFile(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -77,6 +80,9 @@ public:
     static void Readlink(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void Symlink(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void Lstat(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Utimes(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Link(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Truncate(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module

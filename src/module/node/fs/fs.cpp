@@ -84,6 +84,9 @@ v8::Local<v8::ObjectTemplate> FS::CreateTemplate(v8::Isolate* isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readlink"), v8::FunctionTemplate::New(isolate, Readlink));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "symlink"), v8::FunctionTemplate::New(isolate, Symlink));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "lstat"), v8::FunctionTemplate::New(isolate, Lstat));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "utimes"), v8::FunctionTemplate::New(isolate, Utimes));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "link"), v8::FunctionTemplate::New(isolate, Link));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "truncate"), v8::FunctionTemplate::New(isolate, Truncate));
 
     // Expose fs.promises
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "promises"), CreatePromisesTemplate(isolate));
@@ -109,6 +112,9 @@ v8::Local<v8::ObjectTemplate> FS::CreatePromisesTemplate(v8::Isolate* isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readlink"), v8::FunctionTemplate::New(isolate, ReadlinkPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "symlink"), v8::FunctionTemplate::New(isolate, SymlinkPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "lstat"), v8::FunctionTemplate::New(isolate, LstatPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "utimes"), v8::FunctionTemplate::New(isolate, UtimesPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "link"), v8::FunctionTemplate::New(isolate, LinkPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "truncate"), v8::FunctionTemplate::New(isolate, TruncatePromise));
     return tmpl;
 }
 
@@ -2041,6 +2047,293 @@ void FS::LstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         if (!fs::exists(ctx->path, ec) && !fs::is_symlink(fs::symlink_status(ctx->path, ec))) {
             ctx->is_error = true;
             ctx->error_msg = "ENOENT: no such file or directory";
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+// --- Utimes ---
+struct UtimesContext {
+    std::string path;
+    double atime;
+    double mtime;
+    bool is_error = false;
+    std::string error_msg;
+};
+
+void FS::Utimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    if (args.Length() < 4 || !args[0]->IsString() || !args[1]->IsNumber() || !args[2]->IsNumber() || !args[args.Length()-1]->IsFunction()) return;
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    double atime = args[1]->NumberValue(isolate->GetCurrentContext()).FromMaybe(0);
+    double mtime = args[2]->NumberValue(isolate->GetCurrentContext()).FromMaybe(0);
+    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+
+    auto ctx = new UtimesContext();
+    ctx->path = *path;
+    ctx->atime = atime;
+    ctx->mtime = mtime;
+
+    Task* task = new Task();
+    task->callback.Reset(isolate, cb);
+    task->is_promise = false;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<UtimesContext*>(task->data);
+        v8::Local<v8::Value> argv[1];
+        if (ctx->is_error) {
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        // Simplified: only setting mtime via std::filesystem
+        auto time = fs::file_time_type(std::chrono::milliseconds(static_cast<long long>(ctx->mtime)));
+        fs::last_write_time(ctx->path, time, ec);
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+void FS::UtimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsNumber() || !args[2]->IsNumber()) return;
+
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
+    args.GetReturnValue().Set(resolver->GetPromise());
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    double atime = args[1]->NumberValue(context).FromMaybe(0);
+    double mtime = args[2]->NumberValue(context).FromMaybe(0);
+
+    auto ctx = new UtimesContext();
+    ctx->path = *path;
+    ctx->atime = atime;
+    ctx->mtime = mtime;
+
+    Task* task = new Task();
+    task->resolver.Reset(isolate, resolver);
+    task->is_promise = true;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<UtimesContext*>(task->data);
+        auto resolver = task->resolver.Get(isolate);
+        if (ctx->is_error) {
+            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+        } else {
+            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        auto time = fs::file_time_type(std::chrono::milliseconds(static_cast<long long>(ctx->mtime)));
+        fs::last_write_time(ctx->path, time, ec);
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+// --- Link ---
+struct LinkContext {
+    std::string existing_path;
+    std::string new_path;
+    bool is_error = false;
+    std::string error_msg;
+};
+
+void FS::Link(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+
+    v8::String::Utf8Value existing_path(isolate, args[0]);
+    v8::String::Utf8Value new_path(isolate, args[1]);
+    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+
+    auto ctx = new LinkContext();
+    ctx->existing_path = *existing_path;
+    ctx->new_path = *new_path;
+
+    Task* task = new Task();
+    task->callback.Reset(isolate, cb);
+    task->is_promise = false;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<LinkContext*>(task->data);
+        v8::Local<v8::Value> argv[1];
+        if (ctx->is_error) {
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        fs::create_hard_link(ctx->existing_path, ctx->new_path, ec);
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+void FS::LinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) return;
+
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
+    args.GetReturnValue().Set(resolver->GetPromise());
+
+    v8::String::Utf8Value existing_path(isolate, args[0]);
+    v8::String::Utf8Value new_path(isolate, args[1]);
+
+    auto ctx = new LinkContext();
+    ctx->existing_path = *existing_path;
+    ctx->new_path = *new_path;
+
+    Task* task = new Task();
+    task->resolver.Reset(isolate, resolver);
+    task->is_promise = true;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<LinkContext*>(task->data);
+        auto resolver = task->resolver.Get(isolate);
+        if (ctx->is_error) {
+            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+        } else {
+            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        fs::create_hard_link(ctx->existing_path, ctx->new_path, ec);
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+// --- Truncate ---
+struct TruncateContext {
+    std::string path;
+    uintmax_t length;
+    bool is_error = false;
+    std::string error_msg;
+};
+
+void FS::Truncate(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString()) return;
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    uintmax_t length = 0;
+    v8::Local<v8::Function> cb;
+
+    if (args[1]->IsFunction()) {
+        cb = args[1].As<v8::Function>();
+    } else if (args.Length() > 2 && args[1]->IsNumber() && args[2]->IsFunction()) {
+        length = static_cast<uintmax_t>(args[1]->NumberValue(isolate->GetCurrentContext()).FromMaybe(0));
+        cb = args[2].As<v8::Function>();
+    } else {
+        return;
+    }
+
+    auto ctx = new TruncateContext();
+    ctx->path = *path;
+    ctx->length = length;
+
+    Task* task = new Task();
+    task->callback.Reset(isolate, cb);
+    task->is_promise = false;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<TruncateContext*>(task->data);
+        v8::Local<v8::Value> argv[1];
+        if (ctx->is_error) {
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        fs::resize_file(ctx->path, ctx->length, ec);
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+void FS::TruncatePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString()) return;
+
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
+    args.GetReturnValue().Set(resolver->GetPromise());
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    uintmax_t length = 0;
+    if (args.Length() > 1 && args[1]->IsNumber()) {
+        length = static_cast<uintmax_t>(args[1]->NumberValue(context).FromMaybe(0));
+    }
+
+    auto ctx = new TruncateContext();
+    ctx->path = *path;
+    ctx->length = length;
+
+    Task* task = new Task();
+    task->resolver.Reset(isolate, resolver);
+    task->is_promise = true;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<TruncateContext*>(task->data);
+        auto resolver = task->resolver.Get(isolate);
+        if (ctx->is_error) {
+            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+        } else {
+            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        fs::resize_file(ctx->path, ctx->length, ec);
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
         }
         TaskQueue::GetInstance().Enqueue(task);
     });
