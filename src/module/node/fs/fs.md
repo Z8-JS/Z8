@@ -2,6 +2,7 @@
 | ------------------------------------------------------------ | ----------- |
 | fsPromises.stat(path[, options])                             | ✅ Done     |
 | fsPromises.unlink(path)                                      | ✅ Done     |
+| fsPromises.appendFile(path, data[, options])                 | ✅ Done     |
 | fsPromises.writeFile(file, data[, options])                  | ✅ Done     |
 | fsPromises.constants                                         | ✅ Done     |
 | fsPromises.chmod(path, mode)                                 |             |
@@ -21,7 +22,7 @@
 | fsPromises.readdir(path[, options])                          | ✅ Done     |
 | fsPromises.readFile(path[, options])                         | ✅ Done     |
 | fsPromises.readlink(path[, options])                         |             |
-| fsPromises.realpath(path[, options])                         |             |
+| fsPromises.realpath(path[, options])                         | ✅ Done     |
 | fsPromises.rename(oldPath, newPath)                          | ✅ Done     |
 | fsPromises.rmdir(path[, options])                            | ✅ Done     |
 | fsPromises.rm(path[, options])                               |             |
@@ -35,7 +36,7 @@
 | fsPromises.writeFile(file, data[, options])                  | ✅ Done     |
 | fsPromises.constants                                         | ✅ Done     |
 | fs.access(path[, mode], callback)                            | ✅ Done     |
-| fs.appendFile(path, data[, options], callback)               |             |
+| fs.appendFile(path, data[, options], callback)               | ✅ Done     |
 | fs.chmod(path, mode, callback)                               |             |
 | fs.chown(path, uid, gid, callback)                           |             |
 | fs.close(fd[, callback])                                     |             |
@@ -67,7 +68,7 @@
 | fs.readFile(path[, options], callback)                       | ✅ Done     |
 | fs.readlink(path[, options], callback)                       |             |
 | fs.readv(fd, buffers[, position], callback)                  |             |
-| fs.realpath(path[, options], callback)                       |             |
+| fs.realpath(path[, options], callback)                       | ✅ Done     |
 | fs.realpath.native(path[, options], callback)                |             |
 | fs.rename(oldPath, newPath, callback)                        | ✅ Done     |
 | fs.rmdir(path[, options], callback)                          | ✅ Done     |

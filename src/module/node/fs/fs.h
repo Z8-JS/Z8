@@ -53,6 +53,8 @@ public:
     static void RenamePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void CopyFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void AccessPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void AppendFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void RealpathPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Async methods (Callback-based)
     static void ReadFile(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -65,6 +67,8 @@ public:
     static void Rename(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void CopyFile(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void Access(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void AppendFile(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Realpath(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module
