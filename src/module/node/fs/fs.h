@@ -43,17 +43,24 @@ public:
     static void WriteSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void CloseSync(const v8::FunctionCallbackInfo<v8::Value>& args);
 
+    static void ReadFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void WriteFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void StatPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void UnlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void MkdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void ReaddirPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void RmdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void RenamePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+
     // Async methods (Callback-based)
     static void ReadFile(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void WriteFile(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void Stat(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void Unlink(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-    // Promise-based methods (for node:fs/promises)
-    static void ReadFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
-    static void WriteFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
-    static void StatPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
-    static void UnlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Mkdir(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Readdir(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Rmdir(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Rename(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module

@@ -13,17 +13,17 @@
 | fsPromises.lutimes(path, atime, mtime)                       |             |
 | fsPromises.link(existingPath, newPath)                       |             |
 | fsPromises.lstat(path[, options])                            |             |
-| fsPromises.mkdir(path[, options])                            |             |
+| fsPromises.mkdir(path[, options])                            | ✅ Done     |
 | fsPromises.mkdtemp(prefix[, options])                        |             |
 | fsPromises.mkdtempDisposable(prefix[, options])              |             |
 | fsPromises.open(path, flags[, mode])                         |             |
 | fsPromises.opendir(path[, options])                          |             |
-| fsPromises.readdir(path[, options])                          |             |
+| fsPromises.readdir(path[, options])                          | ✅ Done     |
 | fsPromises.readFile(path[, options])                         | ✅ Done     |
 | fsPromises.readlink(path[, options])                         |             |
 | fsPromises.realpath(path[, options])                         |             |
-| fsPromises.rename(oldPath, newPath)                          |             |
-| fsPromises.rmdir(path[, options])                            |             |
+| fsPromises.rename(oldPath, newPath)                          | ✅ Done     |
+| fsPromises.rmdir(path[, options])                            | ✅ Done     |
 | fsPromises.rm(path[, options])                               |             |
 | fsPromises.stat(path[, options])                             | ✅ Done     |
 | fsPromises.statfs(path[, options])                           |             |

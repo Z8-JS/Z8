@@ -72,6 +72,10 @@ v8::Local<v8::ObjectTemplate> FS::CreateTemplate(v8::Isolate* isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "writeFile"), v8::FunctionTemplate::New(isolate, WriteFile));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "stat"), v8::FunctionTemplate::New(isolate, Stat));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "unlink"), v8::FunctionTemplate::New(isolate, Unlink));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "mkdir"), v8::FunctionTemplate::New(isolate, Mkdir));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readdir"), v8::FunctionTemplate::New(isolate, Readdir));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "rmdir"), v8::FunctionTemplate::New(isolate, Rmdir));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "rename"), v8::FunctionTemplate::New(isolate, Rename));
 
     // Expose fs.promises
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "promises"), CreatePromisesTemplate(isolate));
@@ -85,6 +89,10 @@ v8::Local<v8::ObjectTemplate> FS::CreatePromisesTemplate(v8::Isolate* isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "writeFile"), v8::FunctionTemplate::New(isolate, WriteFilePromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "stat"), v8::FunctionTemplate::New(isolate, StatPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "unlink"), v8::FunctionTemplate::New(isolate, UnlinkPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "mkdir"), v8::FunctionTemplate::New(isolate, MkdirPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readdir"), v8::FunctionTemplate::New(isolate, ReaddirPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "rmdir"), v8::FunctionTemplate::New(isolate, RmdirPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "rename"), v8::FunctionTemplate::New(isolate, RenamePromise));
     return tmpl;
 }
 
@@ -512,7 +520,6 @@ void FS::ReadSync(const v8::FunctionCallbackInfo<v8::Value>& args) {}
 void FS::WriteSync(const v8::FunctionCallbackInfo<v8::Value>& args) {}
 void FS::CloseSync(const v8::FunctionCallbackInfo<v8::Value>& args) {}
 
-
 // Async Context for ReadFile
 struct ReadFileContext {
     std::string path;
@@ -733,6 +740,7 @@ void FS::WriteFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         TaskQueue::GetInstance().Enqueue(task);
     });
 }
+
 struct StatContext {
     std::string path;
     bool is_error = false;
@@ -814,6 +822,7 @@ void FS::StatPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         TaskQueue::GetInstance().Enqueue(task);
     });
 }
+
 struct UnlinkContext {
     std::string path;
     bool is_error = false;
@@ -893,5 +902,359 @@ void FS::UnlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         TaskQueue::GetInstance().Enqueue(task);
     });
 }
+
+// --- Mkdir ---
+struct MkdirContext {
+    std::string path;
+    bool is_error = false;
+    std::string error_msg;
+};
+
+void FS::Mkdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+
+    auto ctx = new MkdirContext();
+    ctx->path = *path;
+
+    Task* task = new Task();
+    task->callback.Reset(isolate, cb);
+    task->is_promise = false;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<MkdirContext*>(task->data);
+        v8::Local<v8::Value> argv[1];
+        if (ctx->is_error) {
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        fs::create_directories(ctx->path, ec); // Behaves like mkdir -p
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+void FS::MkdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString()) return;
+
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
+    args.GetReturnValue().Set(resolver->GetPromise());
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    auto ctx = new MkdirContext();
+    ctx->path = *path;
+
+    Task* task = new Task();
+    task->resolver.Reset(isolate, resolver);
+    task->is_promise = true;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<MkdirContext*>(task->data);
+        auto resolver = task->resolver.Get(isolate);
+        if (ctx->is_error) {
+            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+        } else {
+            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        fs::create_directories(ctx->path, ec);
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+// --- Readdir ---
+struct ReaddirContext {
+    std::string path;
+    std::vector<std::string> entries;
+    bool is_error = false;
+    std::string error_msg;
+};
+
+void FS::Readdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+
+    auto ctx = new ReaddirContext();
+    ctx->path = *path;
+
+    Task* task = new Task();
+    task->callback.Reset(isolate, cb);
+    task->is_promise = false;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<ReaddirContext*>(task->data);
+        v8::Local<v8::Value> argv[2];
+        if (ctx->is_error) {
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+            argv[1] = v8::Undefined(isolate);
+        } else {
+            argv[0] = v8::Null(isolate);
+            v8::Local<v8::Array> array = v8::Array::New(isolate, (int)ctx->entries.size());
+            for (size_t i = 0; i < ctx->entries.size(); ++i) {
+                array->Set(context, (uint32_t)i, v8::String::NewFromUtf8(isolate, ctx->entries[i].c_str()).ToLocalChecked()).Check();
+            }
+            argv[1] = array;
+        }
+        (void)task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        for (const auto& entry : fs::directory_iterator(ctx->path, ec)) {
+            ctx->entries.push_back(entry.path().filename().string());
+        }
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+void FS::ReaddirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString()) return;
+
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
+    args.GetReturnValue().Set(resolver->GetPromise());
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    auto ctx = new ReaddirContext();
+    ctx->path = *path;
+
+    Task* task = new Task();
+    task->resolver.Reset(isolate, resolver);
+    task->is_promise = true;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<ReaddirContext*>(task->data);
+        auto resolver = task->resolver.Get(isolate);
+        if (ctx->is_error) {
+            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+        } else {
+            v8::Local<v8::Array> array = v8::Array::New(isolate, (int)ctx->entries.size());
+            for (size_t i = 0; i < ctx->entries.size(); ++i) {
+                array->Set(context, (uint32_t)i, v8::String::NewFromUtf8(isolate, ctx->entries[i].c_str()).ToLocalChecked()).Check();
+            }
+            resolver->Resolve(context, array).Check();
+        }
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        for (const auto& entry : fs::directory_iterator(ctx->path, ec)) {
+            ctx->entries.push_back(entry.path().filename().string());
+        }
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+// --- Rmdir ---
+struct RmdirContext {
+    std::string path;
+    bool is_error = false;
+    std::string error_msg;
+};
+
+void FS::Rmdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+
+    auto ctx = new RmdirContext();
+    ctx->path = *path;
+
+    Task* task = new Task();
+    task->callback.Reset(isolate, cb);
+    task->is_promise = false;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<RmdirContext*>(task->data);
+        v8::Local<v8::Value> argv[1];
+        if (ctx->is_error) {
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        fs::remove(ctx->path, ec); // Standard rmdir (non-recursive in standard fs::remove unless it's empty?) actually fs::remove handles both file and empty dir
+        // Node's rmdir usually expects empty directory. fs::remove also fails if not empty (usually).
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+void FS::RmdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString()) return;
+
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
+    args.GetReturnValue().Set(resolver->GetPromise());
+
+    v8::String::Utf8Value path(isolate, args[0]);
+    auto ctx = new RmdirContext();
+    ctx->path = *path;
+
+    Task* task = new Task();
+    task->resolver.Reset(isolate, resolver);
+    task->is_promise = true;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<RmdirContext*>(task->data);
+        auto resolver = task->resolver.Get(isolate);
+        if (ctx->is_error) {
+            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+        } else {
+            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        fs::remove(ctx->path, ec);
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+// --- Rename ---
+struct RenameContext {
+    std::string old_path;
+    std::string new_path;
+    bool is_error = false;
+    std::string error_msg;
+};
+
+void FS::Rename(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+
+    v8::String::Utf8Value old_path(isolate, args[0]);
+    v8::String::Utf8Value new_path(isolate, args[1]);
+    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+
+    auto ctx = new RenameContext();
+    ctx->old_path = *old_path;
+    ctx->new_path = *new_path;
+
+    Task* task = new Task();
+    task->callback.Reset(isolate, cb);
+    task->is_promise = false;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<RenameContext*>(task->data);
+        v8::Local<v8::Value> argv[1];
+        if (ctx->is_error) {
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        fs::rename(ctx->old_path, ctx->new_path, ec);
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
+void FS::RenamePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) return;
+
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
+    args.GetReturnValue().Set(resolver->GetPromise());
+
+    v8::String::Utf8Value old_path(isolate, args[0]);
+    v8::String::Utf8Value new_path(isolate, args[1]);
+    auto ctx = new RenameContext();
+    ctx->old_path = *old_path;
+    ctx->new_path = *new_path;
+
+    Task* task = new Task();
+    task->resolver.Reset(isolate, resolver);
+    task->is_promise = true;
+    task->data = ctx;
+    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto ctx = static_cast<RenameContext*>(task->data);
+        auto resolver = task->resolver.Get(isolate);
+        if (ctx->is_error) {
+            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+        } else {
+            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete ctx;
+    };
+
+    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+        std::error_code ec;
+        fs::rename(ctx->old_path, ctx->new_path, ec);
+        if (ec) {
+            ctx->is_error = true;
+            ctx->error_msg = ec.message();
+        }
+        TaskQueue::GetInstance().Enqueue(task);
+    });
+}
+
 } // namespace module
 } // namespace z8
