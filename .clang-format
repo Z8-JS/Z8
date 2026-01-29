@@ -13,7 +13,6 @@ AllowShortLoopsOnASingleLine: false
 AllowShortFunctionsOnASingleLine: None
 
 # Cấu hình từ khóa else và catch dính liền với dấu ngoặc đóng
-ControlStatementMacros: []
 AlwaysBreakAfterReturnType: None
 
 # Độ dài tối đa của một dòng

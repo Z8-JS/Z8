@@ -1,15 +1,15 @@
 /* Z8 (Zane V8)
-* A high-performance, competitive JavaScript engine.
-* Copyright (C) 2026 Zane V8 Authors
-* Copyright (C) 2026 Sao Tin Developer Team
-*/
+ * A high-performance, competitive JavaScript engine.
+ * Copyright (C) 2026 Zane V8 Authors
+ * Copyright (C) 2026 Sao Tin Developer Team
+ */
 
 // Standard headers
-#include <iostream>
 #include <fstream>
+#include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
-#include <memory>
 
 // V8 headers
 #include "v8.h"
@@ -18,17 +18,17 @@
 #include "config.h"
 #include "libplatform/libplatform.h"
 
-//Environment interface
+// Environment interface
 #include "module/console.h"
 #include "module/timer.h"
 
-//Interface for the node.js module
+// Interface for the node.js module
 #include "module/node/fs/fs.h"
 #include "task_queue.h"
 #include "thread_pool.h"
 
-#include <thread>
 #include <chrono>
+#include <thread>
 
 #define NOMINMAX
 #ifdef _WIN32
@@ -51,17 +51,17 @@
 namespace z8 {
 
 class Runtime {
-public:
+  public:
     static void Initialize(const char* exec_path) {
         // Clean high-performance V8 flags
         const char* flags = "--stack-size=2048 "
-                           "--max-semi-space-size=128 "
-                           "--no-optimize-for-size "
-                           "--turbo-fast-api-calls";
+                            "--max-semi-space-size=128 "
+                            "--no-optimize-for-size "
+                            "--turbo-fast-api-calls";
         v8::V8::SetFlagsFromString(flags);
 
         v8::V8::InitializeICUDefaultLocation(exec_path);
-        
+
         static std::unique_ptr<v8::Platform> platform = v8::platform::NewDefaultPlatform();
         v8::V8::InitializePlatform(platform.get());
         v8::V8::Initialize();
@@ -75,14 +75,14 @@ public:
     Runtime() {
         v8::Isolate::CreateParams create_params;
         create_params.array_buffer_allocator = v8::ArrayBuffer::Allocator::NewDefaultAllocator();
-        
+
         // Increase memory limits for competitive benchmarking
         // Deno uses ~128MB semi-space, which is ~256MB young generation
         create_params.constraints.set_max_old_generation_size_in_bytes(4096ULL * 1024 * 1024);
         create_params.constraints.set_max_young_generation_size_in_bytes(256ULL * 1024 * 1024);
-        
+
         isolate_ = v8::Isolate::New(create_params);
-        
+
         v8::Isolate::Scope isolate_scope(isolate_);
         v8::HandleScope handle_scope(isolate_);
 
@@ -93,12 +93,13 @@ public:
         // Force override the 'console' object because V8 might have a default empty one
         v8::Context::Scope context_scope(context);
         v8::Local<v8::Object> global = context->Global();
-        v8::Local<v8::Object> console = z8::module::Console::CreateTemplate(isolate_)->NewInstance(context).ToLocalChecked();
-        
+        v8::Local<v8::Object> console =
+            z8::module::Console::createTemplate(isolate_)->NewInstance(context).ToLocalChecked();
+
         global->Set(context, v8::String::NewFromUtf8(isolate_, "console").ToLocalChecked(), console).Check();
-        
+
         // Initialize Timer module
-        z8::module::Timer::Initialize(isolate_, context);
+        z8::module::Timer::initialize(isolate_, context);
     }
 
     ~Runtime() {
@@ -107,20 +108,20 @@ public:
     }
 
     static v8::MaybeLocal<v8::Module> ResolveModuleCallback(v8::Local<v8::Context> context,
-                                                           v8::Local<v8::String> specifier,
-                                                           v8::Local<v8::FixedArray> import_assertions,
-                                                           v8::Local<v8::Module> referrer) {
+                                                            v8::Local<v8::String> specifier,
+                                                            v8::Local<v8::FixedArray> import_assertions,
+                                                            v8::Local<v8::Module> referrer) {
         v8::Isolate* isolate = v8::Isolate::GetCurrent();
         v8::String::Utf8Value specifier_utf8(isolate, specifier);
         std::string specifier_str(*specifier_utf8);
 
         if (specifier_str == "node:fs") {
-            v8::Local<v8::ObjectTemplate> fs_template = z8::module::FS::CreateTemplate(isolate);
-            
+            v8::Local<v8::ObjectTemplate> fs_template = z8::module::FS::createTemplate(isolate);
+
             // To get property names, we must create an instance first.
             v8::Local<v8::Object> fs_instance;
             if (!fs_template->NewInstance(context).ToLocal(&fs_instance)) {
-                 return v8::MaybeLocal<v8::Module>();
+                return v8::MaybeLocal<v8::Module>();
             }
 
             v8::Local<v8::Array> prop_names;
@@ -136,14 +137,17 @@ public:
                 export_names.push_back(name_val.As<v8::String>());
             }
 
-            auto module = v8::Module::CreateSyntheticModule(isolate, 
+            auto module = v8::Module::CreateSyntheticModule(
+                isolate,
                 v8::String::NewFromUtf8Literal(isolate, "node:fs"),
                 v8::MemorySpan<const v8::Local<v8::String>>(export_names.data(), export_names.size()),
                 [](v8::Local<v8::Context> context, v8::Local<v8::Module> module) -> v8::MaybeLocal<v8::Value> {
                     v8::Isolate* isolate = v8::Isolate::GetCurrent();
-                    v8::Local<v8::ObjectTemplate> fs_template = z8::module::FS::CreateTemplate(isolate);
+                    v8::Local<v8::ObjectTemplate> fs_template = z8::module::FS::createTemplate(isolate);
                     v8::Local<v8::Object> fs_obj = fs_template->NewInstance(context).ToLocalChecked();
-                    module->SetSyntheticModuleExport(isolate, v8::String::NewFromUtf8Literal(isolate, "default"), fs_obj).Check();
+                    module
+                        ->SetSyntheticModuleExport(isolate, v8::String::NewFromUtf8Literal(isolate, "default"), fs_obj)
+                        .Check();
                     v8::Local<v8::Array> prop_names;
                     if (fs_obj->GetPropertyNames(context).ToLocal(&prop_names)) {
                         for (uint32_t i = 0; i < prop_names->Length(); ++i) {
@@ -158,7 +162,7 @@ public:
         }
 
         if (specifier_str == "node:fs/promises") {
-            v8::Local<v8::ObjectTemplate> fs_template = z8::module::FS::CreatePromisesTemplate(isolate);
+            v8::Local<v8::ObjectTemplate> fs_template = z8::module::FS::createPromisesTemplate(isolate);
             v8::Local<v8::Object> fs_instance = fs_template->NewInstance(context).ToLocalChecked();
             v8::Local<v8::Array> prop_names = fs_instance->GetPropertyNames(context).ToLocalChecked();
 
@@ -167,17 +171,19 @@ public:
                 export_names.push_back(prop_names->Get(context, i).ToLocalChecked().As<v8::String>());
             }
 
-            auto module = v8::Module::CreateSyntheticModule(isolate, 
+            auto module = v8::Module::CreateSyntheticModule(
+                isolate,
                 v8::String::NewFromUtf8Literal(isolate, "node:fs/promises"),
                 v8::MemorySpan<const v8::Local<v8::String>>(export_names.data(), export_names.size()),
                 [](v8::Local<v8::Context> context, v8::Local<v8::Module> module) -> v8::MaybeLocal<v8::Value> {
                     v8::Isolate* isolate = v8::Isolate::GetCurrent();
-                    v8::Local<v8::ObjectTemplate> fs_template = z8::module::FS::CreatePromisesTemplate(isolate);
+                    v8::Local<v8::ObjectTemplate> fs_template = z8::module::FS::createPromisesTemplate(isolate);
                     v8::Local<v8::Object> fs_obj = fs_template->NewInstance(context).ToLocalChecked();
                     v8::Local<v8::Array> prop_names = fs_obj->GetPropertyNames(context).ToLocalChecked();
                     for (uint32_t i = 0; i < prop_names->Length(); ++i) {
                         v8::Local<v8::String> name = prop_names->Get(context, i).ToLocalChecked().As<v8::String>();
-                        module->SetSyntheticModuleExport(isolate, name, fs_obj->Get(context, name).ToLocalChecked()).Check();
+                        module->SetSyntheticModuleExport(isolate, name, fs_obj->Get(context, name).ToLocalChecked())
+                            .Check();
                     }
                     return v8::Undefined(isolate);
                 });
@@ -186,7 +192,8 @@ public:
 
         // Handle relative imports (very basic for now)
         // In a real implementation, we'd read the file and compile it as a module
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Module not found: " + specifier_str).c_str()).ToLocalChecked());
+        isolate->ThrowException(
+            v8::String::NewFromUtf8(isolate, ("Module not found: " + specifier_str).c_str()).ToLocalChecked());
         return v8::MaybeLocal<v8::Module>();
     }
 
@@ -196,29 +203,29 @@ public:
         v8::HandleScope handle_scope(isolate);
         v8::Local<v8::Context> context = context_.Get(isolate);
         v8::Context::Scope context_scope(context);
-        
+
         v8::TryCatch try_catch(isolate);
-        
+
         v8::Local<v8::String> v8_source = v8::String::NewFromUtf8(isolate, source.c_str()).ToLocalChecked();
         v8::Local<v8::String> v8_filename = v8::String::NewFromUtf8(isolate, filename.c_str()).ToLocalChecked();
-        
+
         // Modules are faster as V8 applies more aggressive optimizations to them
         v8::ScriptOrigin origin(v8_filename, 0, 0, false, -1, v8::Local<v8::Value>(), false, false, true);
         v8::ScriptCompiler::Source script_source(v8_source, origin);
         v8::Local<v8::Module> module;
-        
+
         if (!v8::ScriptCompiler::CompileModule(isolate, &script_source).ToLocal(&module)) {
             ReportException(isolate, &try_catch);
             return false;
         }
-        
+
         if (!module->InstantiateModule(context, ResolveModuleCallback).FromMaybe(false)) {
             ReportException(isolate, &try_catch);
             return false;
         }
-        
+
         v8::MaybeLocal<v8::Value> result = module->Evaluate(context);
-        
+
         if (try_catch.HasCaught()) {
             ReportException(isolate, &try_catch);
             return false;
@@ -234,18 +241,18 @@ public:
                 return false;
             }
         }
-        
+
         // Event Loop
         bool keep_running = true;
         while (keep_running) {
             // 1. Process Tasks from Thread Pool
-            while (!z8::TaskQueue::GetInstance().IsEmpty()) {
-                z8::Task* task = z8::TaskQueue::GetInstance().Dequeue();
+            while (!z8::TaskQueue::getInstance().isEmpty()) {
+                z8::Task* task = z8::TaskQueue::getInstance().dequeue();
                 if (task) {
                     v8::TryCatch task_try_catch(isolate);
                     task->runner(isolate, context, task);
                     delete task;
-                    
+
                     // Resume JS execution
                     isolate->PerformMicrotaskCheckpoint();
 
@@ -257,9 +264,9 @@ public:
             }
 
             // 2. Process Timers
-            if (z8::module::Timer::HasActiveTimers()) {
+            if (z8::module::Timer::hasActiveTimers()) {
                 v8::TryCatch loop_try_catch(isolate);
-                z8::module::Timer::Tick(isolate, context);
+                z8::module::Timer::tick(isolate, context);
                 isolate->PerformMicrotaskCheckpoint();
                 if (loop_try_catch.HasCaught()) {
                     ReportException(isolate, &loop_try_catch);
@@ -268,29 +275,27 @@ public:
             }
 
             // 3. Final termination check
-            if (!z8::module::Timer::HasActiveTimers() && 
-                z8::TaskQueue::GetInstance().IsEmpty() && 
-                !z8::ThreadPool::GetInstance().HasPendingTasks()) {
-                
+            if (!z8::module::Timer::hasActiveTimers() && z8::TaskQueue::getInstance().isEmpty() &&
+                !z8::ThreadPool::getInstance().hasPendingTasks()) {
                 // One last check for microtasks that might have been queued
                 isolate->PerformMicrotaskCheckpoint();
-                
-                if (z8::TaskQueue::GetInstance().IsEmpty() && !z8::ThreadPool::GetInstance().HasPendingTasks()) {
+
+                if (z8::TaskQueue::getInstance().isEmpty() && !z8::ThreadPool::getInstance().hasPendingTasks()) {
                     keep_running = false;
                 }
             }
 
             // 4. Wait for work (Instant Wakeup)
-            if (keep_running && z8::TaskQueue::GetInstance().IsEmpty()) {
-                std::chrono::milliseconds delay = z8::module::Timer::GetNextDelay();
+            if (keep_running && z8::TaskQueue::getInstance().isEmpty()) {
+                std::chrono::milliseconds delay = z8::module::Timer::getNextDelay();
                 std::chrono::milliseconds timeout(50); // Balanced polling
                 if (delay.count() >= 0) {
-                    timeout = std::chrono::milliseconds(std::min((long long)delay.count(), 50LL));
+                    timeout = std::chrono::milliseconds(std::min((long long) delay.count(), 50LL));
                 }
-                z8::TaskQueue::GetInstance().Wait(timeout);
+                z8::TaskQueue::getInstance().wait(timeout);
             }
         }
-        
+
         return true;
     }
 
@@ -307,16 +312,19 @@ public:
         std::string line;
         while (true) {
             std::cout << "> " << std::flush;
-            if (!std::getline(std::cin, line)) break;
-            if (line == "exit" || line == ".exit") break;
-            if (line.empty()) continue;
+            if (!std::getline(std::cin, line))
+                break;
+            if (line == "exit" || line == ".exit")
+                break;
+            if (line.empty())
+                continue;
 
             v8::TryCatch try_catch(isolate);
             v8::Local<v8::String> source = v8::String::NewFromUtf8(isolate, line.c_str()).ToLocalChecked();
             v8::Local<v8::Script> script;
             if (!v8::Script::Compile(context, source).ToLocal(&script)) {
-                 ReportException(isolate, &try_catch);
-                 continue;
+                ReportException(isolate, &try_catch);
+                continue;
             }
 
             v8::Local<v8::Value> result;
@@ -332,13 +340,13 @@ public:
         }
     }
 
-private:
+  private:
     void ReportException(v8::Isolate* isolate, v8::TryCatch* try_catch) {
         fflush(stdout); // Rescue any buffered stdout before reporting error
         v8::HandleScope handle_scope(isolate);
         v8::Local<v8::Context> context = isolate->GetCurrentContext();
         v8::Local<v8::Message> message = try_catch->Message();
-        
+
         if (message.IsEmpty()) {
             // V8 didn't provide a message, just print the exception
             v8::Local<v8::Value> exception = try_catch->Exception();
@@ -352,38 +360,39 @@ private:
             v8::String::Utf8Value exception(isolate, try_catch->Exception());
             v8::Local<v8::Value> resource_name = message->GetScriptResourceName();
             v8::String::Utf8Value filename(isolate, resource_name);
-            
+
             int linenum = message->GetLineNumber(context).FromMaybe(-1);
             const char* filename_str = *filename ? *filename : "unknown";
             const char* exception_str = *exception ? *exception : "unknown";
-            
+
             std::cerr << filename_str << ":" << linenum << ": " << exception_str << std::endl;
-            
+
             v8::MaybeLocal<v8::String> sourceline_maybe = message->GetSourceLine(context);
             if (!sourceline_maybe.IsEmpty()) {
                 v8::String::Utf8Value sourceline(isolate, sourceline_maybe.ToLocalChecked());
                 std::cerr << *sourceline << std::endl;
-                
+
                 int start = message->GetStartColumn(context).FromMaybe(0);
-                for (int i = 0; i < start; i++) std::cerr << " ";
+                for (int i = 0; i < start; i++)
+                    std::cerr << " ";
                 int end = message->GetEndColumn(context).FromMaybe(0);
-                for (int i = start; i < end; i++) std::cerr << "^";
+                for (int i = start; i < end; i++)
+                    std::cerr << "^";
                 std::cerr << std::endl;
             }
         }
-        
+
         v8::Local<v8::Value> stack_trace;
-        if (try_catch->StackTrace(context).ToLocal(&stack_trace) &&
-            stack_trace->IsString() &&
+        if (try_catch->StackTrace(context).ToLocal(&stack_trace) && stack_trace->IsString() &&
             v8::Local<v8::String>::Cast(stack_trace)->Length() > 0) {
             v8::String::Utf8Value stack_trace_str(isolate, stack_trace);
             std::cerr << *stack_trace_str << std::endl;
         }
-        
+
         fflush(stderr);
     }
-public:
 
+  public:
     v8::Isolate* isolate_;
     v8::Global<v8::Context> context_;
 };
@@ -397,8 +406,9 @@ namespace fs = std::filesystem;
 // Helper to read file
 std::string ReadFile(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
-    if (!file.is_open()) return "";
-    
+    if (!file.is_open())
+        return "";
+
     std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     return content;
 }

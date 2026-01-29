@@ -1,65 +1,66 @@
 #ifndef Z8_THREAD_POOL_H
 #define Z8_THREAD_POOL_H
 
-#include <vector>
-#include <queue>
-#include <thread>
-#include <mutex>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <future>
+#include <mutex>
+#include <queue>
+#include <thread>
+#include <vector>
 
 namespace z8 {
 
 class ThreadPool {
-public:
-    static ThreadPool& GetInstance() {
-        static ThreadPool instance(std::thread::hardware_concurrency());
-        return instance;
+  public:
+    static ThreadPool& getInstance() {
+        static ThreadPool s_instance(static_cast<size_t>(std::thread::hardware_concurrency()));
+        return s_instance;
     }
 
-    template<class F, class... Args>
-    auto Enqueue(F&& f, Args&&... args) 
-        -> std::future<typename std::invoke_result_t<F, Args...>> {
+    template <class F, class... Args>
+    auto enqueue(F&& f, Args&&... args) -> std::future<typename std::invoke_result_t<F, Args...>> {
         using return_type = typename std::invoke_result_t<F, Args...>;
 
-        auto task = std::make_shared<std::packaged_task<return_type()>>(
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-        );
-        
-        std::future<return_type> res = task->get_future();
+        auto sp_task = std::make_shared<std::packaged_task<return_type()>>(
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+
+        std::future<return_type> res = sp_task->get_future();
         {
-            std::unique_lock<std::mutex> lock(queue_mutex);
-            if(stop) throw std::runtime_error("enqueue on stopped ThreadPool");
-            tasks.emplace([task](){ (*task)(); });
+            std::unique_lock<std::mutex> lock(m_queue_mutex);
+            if (m_stop)
+                throw std::runtime_error("enqueue on stopped ThreadPool");
+            m_tasks.emplace([sp_task]() { (*sp_task)(); });
         }
-        condition.notify_one();
+        m_condition.notify_one();
         return res;
     }
 
-    bool HasPendingTasks() {
-        std::unique_lock<std::mutex> lock(queue_mutex);
-        return !tasks.empty() || active_tasks > 0;
+    bool hasPendingTasks() {
+        std::unique_lock<std::mutex> lock(m_queue_mutex);
+        return !m_tasks.empty() || m_active_tasks > 0;
     }
 
-private:
-    ThreadPool(size_t threads) : stop(false), active_tasks(0) {
-        for(size_t i = 0; i<threads; ++i)
-            workers.emplace_back([this] {
-                for(;;) {
+  private:
+    ThreadPool(size_t threads) : m_stop(false), m_active_tasks(0) {
+        for (size_t i = 0; i < threads; ++i)
+            m_workers.emplace_back([this] {
+                for (;;) {
                     std::function<void()> task;
                     {
-                        std::unique_lock<std::mutex> lock(this->queue_mutex);
-                        this->condition.wait(lock, [this]{ return this->stop || !this->tasks.empty(); });
-                        if(this->stop && this->tasks.empty()) return;
-                        task = std::move(this->tasks.front());
-                        this->tasks.pop();
-                        this->active_tasks++; 
+                        std::unique_lock<std::mutex> lock(this->m_queue_mutex);
+                        this->m_condition.wait(lock, [this] { return this->m_stop || !this->m_tasks.empty(); });
+                        if (this->m_stop && this->m_tasks.empty())
+                            return;
+                        task = std::move(this->m_tasks.front());
+                        this->m_tasks.pop();
+                        this->m_active_tasks++;
                     }
                     task();
                     {
-                        std::unique_lock<std::mutex> lock(this->queue_mutex);
-                        this->active_tasks--;
+                        std::unique_lock<std::mutex> lock(this->m_queue_mutex);
+                        this->m_active_tasks--;
                     }
                 }
             });
@@ -67,19 +68,20 @@ private:
 
     ~ThreadPool() {
         {
-            std::unique_lock<std::mutex> lock(queue_mutex);
-            stop = true;
+            std::unique_lock<std::mutex> lock(m_queue_mutex);
+            m_stop = true;
         }
-        condition.notify_all();
-        for(std::thread &worker: workers) worker.join();
+        m_condition.notify_all();
+        for (std::thread& worker : m_workers)
+            worker.join();
     }
 
-    std::vector<std::thread> workers;
-    std::queue<std::function<void()>> tasks;
-    std::mutex queue_mutex;
-    std::condition_variable condition;
-    bool stop;
-    int active_tasks;
+    std::vector<std::thread> m_workers;
+    std::queue<std::function<void()>> m_tasks;
+    std::mutex m_queue_mutex;
+    std::condition_variable m_condition;
+    bool m_stop;
+    int32_t m_active_tasks;
 };
 
 } // namespace z8

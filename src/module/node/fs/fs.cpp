@@ -1,44 +1,49 @@
 #include "fs.h"
-#include <v8-isolate.h>
-#include <fstream>
-#include <filesystem>
-#include <string>
 #include <chrono>
 #include <fcntl.h> // For O_* constants
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <sys/stat.h>
+#include <v8-isolate.h>
 #ifdef _WIN32
 #include <io.h>
-#include <windows.h>
 #include <process.h>
+#include <windows.h>
 #define ssize_t long long
 
-static ssize_t pread(int fd, void* buf, size_t count, int64_t offset) {
-    HANDLE h = (HANDLE)_get_osfhandle(fd);
-    if (h == INVALID_HANDLE_VALUE) return -1;
+static int64_t pread(int32_t fd, void* p_buf, size_t count, int64_t offset) {
+    HANDLE h = (HANDLE) _get_osfhandle(fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return -1;
     OVERLAPPED ov = {0};
-    ov.Offset = (DWORD)(offset & 0xFFFFFFFF);
-    ov.OffsetHigh = (DWORD)(offset >> 32);
-    DWORD bytesRead = 0;
-    if (ReadFile(h, buf, (DWORD)count, &bytesRead, &ov)) return (ssize_t)bytesRead;
-    if (GetLastError() == ERROR_HANDLE_EOF) return 0;
+    ov.Offset = (DWORD) (offset & 0xFFFFFFFF);
+    ov.OffsetHigh = (DWORD) (offset >> 32);
+    DWORD bytes_read = 0;
+    if (ReadFile(h, p_buf, (DWORD) count, &bytes_read, &ov))
+        return (int64_t) bytes_read;
+    if (GetLastError() == ERROR_HANDLE_EOF)
+        return 0;
     return -1;
 }
 
-static ssize_t pwrite(int fd, const void* buf, size_t count, int64_t offset) {
-    HANDLE h = (HANDLE)_get_osfhandle(fd);
-    if (h == INVALID_HANDLE_VALUE) return -1;
+static int64_t pwrite(int32_t fd, const void* p_buf, size_t count, int64_t offset) {
+    HANDLE h = (HANDLE) _get_osfhandle(fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return -1;
     OVERLAPPED ov = {0};
-    ov.Offset = (DWORD)(offset & 0xFFFFFFFF);
-    ov.OffsetHigh = (DWORD)(offset >> 32);
-    DWORD bytesWritten = 0;
-    if (WriteFile(h, buf, (DWORD)count, &bytesWritten, &ov)) return (ssize_t)bytesWritten;
+    ov.Offset = (DWORD) (offset & 0xFFFFFFFF);
+    ov.OffsetHigh = (DWORD) (offset >> 32);
+    DWORD bytes_written = 0;
+    if (WriteFile(h, p_buf, (DWORD) count, &bytes_written, &ov))
+        return (int64_t) bytes_written;
     return -1;
 }
 #else
 #include <unistd.h>
 #endif
-#include "thread_pool.h"
 #include "task_queue.h"
+#include "thread_pool.h"
 #include <v8-promise.h>
 
 #ifdef _WIN32
@@ -53,187 +58,248 @@ namespace module {
 // Helper to convert file_time_type to V8 Date
 // Helper to convert V8 milliseconds to file_time_type
 fs::file_time_type V8MillisecondsToFileTime(double ms) {
-    auto system_time = std::chrono::system_clock::time_point(std::chrono::milliseconds(static_cast<long long>(ms)));
+    auto system_time = std::chrono::system_clock::time_point(std::chrono::milliseconds(static_cast<int64_t>(ms)));
     return fs::file_time_type::clock::now() + (system_time - std::chrono::system_clock::now());
 }
 
-v8::Local<v8::Value> FileTimeToV8Date(v8::Isolate* isolate, fs::file_time_type ftime) {
-    auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(ftime - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
-    double ms = static_cast<double>(std::chrono::time_point_cast<std::chrono::milliseconds>(sctp).time_since_epoch().count());
-    return v8::Date::New(isolate->GetCurrentContext(), ms).ToLocalChecked();
+v8::Local<v8::Value> FileTimeToV8Date(v8::Isolate* p_isolate, fs::file_time_type ftime) {
+    auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+        ftime - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
+    double ms =
+        static_cast<double>(std::chrono::time_point_cast<std::chrono::milliseconds>(sctp).time_since_epoch().count());
+    return v8::Date::New(p_isolate->GetCurrentContext(), ms).ToLocalChecked();
 }
 
-v8::Local<v8::ObjectTemplate> FS::CreateTemplate(v8::Isolate* isolate) {
-    v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(isolate);
+v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
+    v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
 
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "readFileSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::ReadFileSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "writeFileSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::WriteFileSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "existsSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::ExistsSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "appendFileSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::AppendFileSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "statSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::StatSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "mkdirSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::MkdirSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "rmSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::RmSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "rmdirSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::RmdirSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "unlinkSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::UnlinkSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "lstatSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::LstatSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "readdirSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::ReaddirSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "renameSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::RenameSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "copyFileSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::CopyFileSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "realpathSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::RealpathSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "accessSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::AccessSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "chmodSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::ChmodSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "chownSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::ChownSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "utimesSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::UtimesSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "readlinkSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::ReadlinkSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "symlinkSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::SymlinkSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "linkSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::LinkSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "truncateSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::TruncateSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "openSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::OpenSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "readSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::ReadSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "writeSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::WriteSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "closeSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::CloseSync));
-    tmpl->Set(v8::String::NewFromUtf8(isolate, "fstatSync").ToLocalChecked(), v8::FunctionTemplate::New(isolate, FS::FstatSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "readFileSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::readFileSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "writeFileSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::writeFileSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "existsSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::existsSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "appendFileSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::appendFileSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "statSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::statSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "mkdirSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::mkdirSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "rmSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::rmSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "rmdirSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::rmdirSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "unlinkSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::unlinkSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "lstatSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::lstatSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "readdirSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::readdirSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "renameSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::renameSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "copyFileSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::copyFileSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "realpathSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::realpathSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "accessSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::accessSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "chmodSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::chmodSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "chownSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::chownSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "utimesSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::utimesSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "readlinkSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::readlinkSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "symlinkSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::symlinkSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "linkSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::linkSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "truncateSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::truncateSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "openSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::openSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "readSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::readSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "writeSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::writeSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "closeSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::closeSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "fstatSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::fstatSync));
 
     // Add fs.constants
-    v8::Local<v8::ObjectTemplate> constants_tmpl = v8::ObjectTemplate::New(isolate);
-    constants_tmpl->Set(isolate, "F_OK", v8::Integer::New(isolate, 0));
-    constants_tmpl->Set(isolate, "R_OK", v8::Integer::New(isolate, 4));
-    constants_tmpl->Set(isolate, "W_OK", v8::Integer::New(isolate, 2));
-    constants_tmpl->Set(isolate, "X_OK", v8::Integer::New(isolate, 1));
-    constants_tmpl->Set(isolate, "O_RDONLY", v8::Integer::New(isolate, 0));
-    constants_tmpl->Set(isolate, "O_WRONLY", v8::Integer::New(isolate, 1));
-    constants_tmpl->Set(isolate, "O_RDWR", v8::Integer::New(isolate, 2));
-    constants_tmpl->Set(isolate, "O_CREAT", v8::Integer::New(isolate, 0x0100));
-    constants_tmpl->Set(isolate, "O_EXCL", v8::Integer::New(isolate, 0x0200));
-    constants_tmpl->Set(isolate, "O_TRUNC", v8::Integer::New(isolate, 0x0400));
-    constants_tmpl->Set(isolate, "O_APPEND", v8::Integer::New(isolate, 0x0008));
-    
-    tmpl->Set(isolate, "constants", constants_tmpl);
+    v8::Local<v8::ObjectTemplate> constants_tmpl = v8::ObjectTemplate::New(p_isolate);
+    constants_tmpl->Set(p_isolate, "F_OK", v8::Integer::New(p_isolate, 0));
+    constants_tmpl->Set(p_isolate, "R_OK", v8::Integer::New(p_isolate, 4));
+    constants_tmpl->Set(p_isolate, "W_OK", v8::Integer::New(p_isolate, 2));
+    constants_tmpl->Set(p_isolate, "X_OK", v8::Integer::New(p_isolate, 1));
+    constants_tmpl->Set(p_isolate, "O_RDONLY", v8::Integer::New(p_isolate, 0));
+    constants_tmpl->Set(p_isolate, "O_WRONLY", v8::Integer::New(p_isolate, 1));
+    constants_tmpl->Set(p_isolate, "O_RDWR", v8::Integer::New(p_isolate, 2));
+    constants_tmpl->Set(p_isolate, "O_CREAT", v8::Integer::New(p_isolate, 0x0100));
+    constants_tmpl->Set(p_isolate, "O_EXCL", v8::Integer::New(p_isolate, 0x0200));
+    constants_tmpl->Set(p_isolate, "O_TRUNC", v8::Integer::New(p_isolate, 0x0400));
+    constants_tmpl->Set(p_isolate, "O_APPEND", v8::Integer::New(p_isolate, 0x0008));
+
+    tmpl->Set(p_isolate, "constants", constants_tmpl);
 
     // Async methods
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readFile"), v8::FunctionTemplate::New(isolate, FS::ReadFile));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "writeFile"), v8::FunctionTemplate::New(isolate, FS::WriteFile));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "stat"), v8::FunctionTemplate::New(isolate, FS::Stat));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "unlink"), v8::FunctionTemplate::New(isolate, FS::Unlink));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "mkdir"), v8::FunctionTemplate::New(isolate, FS::Mkdir));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readdir"), v8::FunctionTemplate::New(isolate, FS::Readdir));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "rmdir"), v8::FunctionTemplate::New(isolate, FS::Rmdir));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "rename"), v8::FunctionTemplate::New(isolate, FS::Rename));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "copyFile"), v8::FunctionTemplate::New(isolate, FS::CopyFile));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "access"), v8::FunctionTemplate::New(isolate, FS::Access));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "appendFile"), v8::FunctionTemplate::New(isolate, FS::AppendFile));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "realpath"), v8::FunctionTemplate::New(isolate, FS::Realpath));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "chmod"), v8::FunctionTemplate::New(isolate, FS::Chmod));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readlink"), v8::FunctionTemplate::New(isolate, FS::Readlink));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "symlink"), v8::FunctionTemplate::New(isolate, FS::Symlink));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "lstat"), v8::FunctionTemplate::New(isolate, FS::Lstat));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "utimes"), v8::FunctionTemplate::New(isolate, FS::Utimes));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "link"), v8::FunctionTemplate::New(isolate, FS::Link));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "truncate"), v8::FunctionTemplate::New(isolate, FS::Truncate));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "open"), v8::FunctionTemplate::New(isolate, FS::Open));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "read"), v8::FunctionTemplate::New(isolate, FS::Read));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "write"), v8::FunctionTemplate::New(isolate, FS::Write));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "close"), v8::FunctionTemplate::New(isolate, FS::Close));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "fstat"), v8::FunctionTemplate::New(isolate, FS::Fstat));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "readFile"),
+              v8::FunctionTemplate::New(p_isolate, FS::readFile));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeFile"),
+              v8::FunctionTemplate::New(p_isolate, FS::writeFile));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "stat"), v8::FunctionTemplate::New(p_isolate, FS::stat));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "unlink"), v8::FunctionTemplate::New(p_isolate, FS::unlink));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "mkdir"), v8::FunctionTemplate::New(p_isolate, FS::mkdir));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "readdir"), v8::FunctionTemplate::New(p_isolate, FS::readdir));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "rmdir"), v8::FunctionTemplate::New(p_isolate, FS::rmdir));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "rename"), v8::FunctionTemplate::New(p_isolate, FS::rename));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "copyFile"),
+              v8::FunctionTemplate::New(p_isolate, FS::copyFile));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "access"), v8::FunctionTemplate::New(p_isolate, FS::access));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "appendFile"),
+              v8::FunctionTemplate::New(p_isolate, FS::appendFile));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "realpath"),
+              v8::FunctionTemplate::New(p_isolate, FS::realpath));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "chmod"), v8::FunctionTemplate::New(p_isolate, FS::chmod));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "readlink"),
+              v8::FunctionTemplate::New(p_isolate, FS::readlink));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "symlink"), v8::FunctionTemplate::New(p_isolate, FS::symlink));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "lstat"), v8::FunctionTemplate::New(p_isolate, FS::lstat));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "utimes"), v8::FunctionTemplate::New(p_isolate, FS::utimes));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "link"), v8::FunctionTemplate::New(p_isolate, FS::link));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "truncate"),
+              v8::FunctionTemplate::New(p_isolate, FS::truncate));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "open"), v8::FunctionTemplate::New(p_isolate, FS::open));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "read"), v8::FunctionTemplate::New(p_isolate, FS::read));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, FS::write));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, FS::close));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fstat"), v8::FunctionTemplate::New(p_isolate, FS::fstat));
 
     // Expose fs.promises
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "promises"), CreatePromisesTemplate(isolate));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "promises"), createPromisesTemplate(p_isolate));
 
     return tmpl;
 }
 
-v8::Local<v8::ObjectTemplate> FS::CreatePromisesTemplate(v8::Isolate* isolate) {
-    v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(isolate);
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readFile"), v8::FunctionTemplate::New(isolate, FS::ReadFilePromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "writeFile"), v8::FunctionTemplate::New(isolate, FS::WriteFilePromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "stat"), v8::FunctionTemplate::New(isolate, FS::StatPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "unlink"), v8::FunctionTemplate::New(isolate, FS::UnlinkPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "mkdir"), v8::FunctionTemplate::New(isolate, FS::MkdirPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readdir"), v8::FunctionTemplate::New(isolate, FS::ReaddirPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "rmdir"), v8::FunctionTemplate::New(isolate, FS::RmdirPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "rename"), v8::FunctionTemplate::New(isolate, FS::RenamePromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "copyFile"), v8::FunctionTemplate::New(isolate, FS::CopyFilePromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "access"), v8::FunctionTemplate::New(isolate, FS::AccessPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "appendFile"), v8::FunctionTemplate::New(isolate, FS::AppendFilePromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "realpath"), v8::FunctionTemplate::New(isolate, FS::RealpathPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "chmod"), v8::FunctionTemplate::New(isolate, FS::ChmodPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "readlink"), v8::FunctionTemplate::New(isolate, FS::ReadlinkPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "symlink"), v8::FunctionTemplate::New(isolate, FS::SymlinkPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "lstat"), v8::FunctionTemplate::New(isolate, FS::LstatPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "utimes"), v8::FunctionTemplate::New(isolate, FS::UtimesPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "link"), v8::FunctionTemplate::New(isolate, FS::LinkPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "truncate"), v8::FunctionTemplate::New(isolate, FS::TruncatePromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "open"), v8::FunctionTemplate::New(isolate, FS::OpenPromise));
-    tmpl->Set(v8::String::NewFromUtf8Literal(isolate, "fstat"), v8::FunctionTemplate::New(isolate, FS::FstatPromise));
+v8::Local<v8::ObjectTemplate> FS::createPromisesTemplate(v8::Isolate* p_isolate) {
+    v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "readFile"),
+              v8::FunctionTemplate::New(p_isolate, FS::readFilePromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeFile"),
+              v8::FunctionTemplate::New(p_isolate, FS::writeFilePromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "stat"), v8::FunctionTemplate::New(p_isolate, FS::statPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "unlink"),
+              v8::FunctionTemplate::New(p_isolate, FS::unlinkPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "mkdir"),
+              v8::FunctionTemplate::New(p_isolate, FS::mkdirPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "readdir"),
+              v8::FunctionTemplate::New(p_isolate, FS::readdirPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "rmdir"),
+              v8::FunctionTemplate::New(p_isolate, FS::rmdirPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "rename"),
+              v8::FunctionTemplate::New(p_isolate, FS::renamePromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "copyFile"),
+              v8::FunctionTemplate::New(p_isolate, FS::copyFilePromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "access"),
+              v8::FunctionTemplate::New(p_isolate, FS::accessPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "appendFile"),
+              v8::FunctionTemplate::New(p_isolate, FS::appendFilePromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "realpath"),
+              v8::FunctionTemplate::New(p_isolate, FS::realpathPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "chmod"),
+              v8::FunctionTemplate::New(p_isolate, FS::chmodPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "readlink"),
+              v8::FunctionTemplate::New(p_isolate, FS::readlinkPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "symlink"),
+              v8::FunctionTemplate::New(p_isolate, FS::symlinkPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "lstat"),
+              v8::FunctionTemplate::New(p_isolate, FS::lstatPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "utimes"),
+              v8::FunctionTemplate::New(p_isolate, FS::utimesPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "link"), v8::FunctionTemplate::New(p_isolate, FS::linkPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "truncate"),
+              v8::FunctionTemplate::New(p_isolate, FS::truncatePromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "open"), v8::FunctionTemplate::New(p_isolate, FS::openPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fstat"),
+              v8::FunctionTemplate::New(p_isolate, FS::fstatPromise));
     return tmpl;
 }
 
-
-void FS::ReadFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+void FS::readFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
 
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string").ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value path_val(isolate, args[0]);
+    v8::String::Utf8Value path_val(p_isolate, args[0]);
     std::string path(*path_val);
 
     std::string encoding = "";
     if (args.Length() >= 2 && args[1]->IsString()) {
-        v8::String::Utf8Value enc_val(isolate, args[1]);
+        v8::String::Utf8Value enc_val(p_isolate, args[1]);
         encoding = *enc_val;
     } else if (args.Length() >= 2 && args[1]->IsObject()) {
-        v8::Local<v8::Object> options = args[1].As<v8::Object>();
-        v8::Local<v8::Value> enc_opt;
-        if (options->Get(context, v8::String::NewFromUtf8Literal(isolate, "encoding")).ToLocal(&enc_opt) && enc_opt->IsString()) {
-            v8::String::Utf8Value enc_val(isolate, enc_opt);
+        v8::Local<v8::Object> p_options = args[1].As<v8::Object>();
+        v8::Local<v8::Value> p_enc_opt;
+        if (p_options->Get(p_context, v8::String::NewFromUtf8Literal(p_isolate, "encoding")).ToLocal(&p_enc_opt) &&
+            p_enc_opt->IsString()) {
+            v8::String::Utf8Value enc_val(p_isolate, p_enc_opt);
             encoding = *enc_val;
         }
     }
 
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Error: ENOENT: no such file or directory").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "Error: ENOENT: no such file or directory").ToLocalChecked());
         return;
     }
 
-    std::streamsize size = file.tellg();
+    int64_t size = file.tellg();
     file.seekg(0, std::ios::beg);
 
     if (encoding == "utf8") {
         std::string content(size, '\0');
         if (file.read(&content[0], size)) {
-            args.GetReturnValue().Set(v8::String::NewFromUtf8(isolate, content.c_str(), v8::NewStringType::kNormal, (int)size).ToLocalChecked());
+            args.GetReturnValue().Set(
+                v8::String::NewFromUtf8(
+                    p_isolate, content.c_str(), v8::NewStringType::kNormal, static_cast<int32_t>(size))
+                    .ToLocalChecked());
         }
     } else {
-        v8::Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(isolate, size);
-        std::shared_ptr<v8::BackingStore> backing_store = ab->GetBackingStore();
-        if (file.read(static_cast<char*>(backing_store->Data()), size)) {
+        v8::Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(p_isolate, size);
+        std::shared_ptr<v8::BackingStore> sp_backing_store = ab->GetBackingStore();
+        if (file.read(static_cast<char*>(sp_backing_store->Data()), size)) {
             v8::Local<v8::Uint8Array> ui8 = v8::Uint8Array::New(ab, 0, size);
             args.GetReturnValue().Set(ui8);
         }
     }
 }
 
-void FS::WriteFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::writeFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
 
     if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path and data must be strings").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path and data must be strings").ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value path_val(isolate, args[0]);
-    v8::String::Utf8Value data_val(isolate, args[1]);
+    v8::String::Utf8Value path_val(p_isolate, args[0]);
+    v8::String::Utf8Value data_val(p_isolate, args[1]);
 
     std::ofstream file(*path_val, std::ios::binary);
     if (!file.is_open()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Error: Could not open file for writing").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "Error: Could not open file for writing").ToLocalChecked());
         return;
     }
 
@@ -241,21 +307,23 @@ void FS::WriteFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     file.close();
 }
 
-void FS::AppendFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::appendFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
 
     if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path and data must be strings").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path and data must be strings").ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value path_val(isolate, args[0]);
-    v8::String::Utf8Value data_val(isolate, args[1]);
+    v8::String::Utf8Value path_val(p_isolate, args[0]);
+    v8::String::Utf8Value data_val(p_isolate, args[1]);
 
     std::ofstream file(*path_val, std::ios::binary | std::ios::app);
     if (!file.is_open()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Error: Could not open file for appending").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "Error: Could not open file for appending").ToLocalChecked());
         return;
     }
 
@@ -263,89 +331,129 @@ void FS::AppendFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     file.close();
 }
 
-
-void FS::ExistsSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::existsSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
 
     if (args.Length() < 1 || !args[0]->IsString()) {
         args.GetReturnValue().Set(false);
         return;
     }
 
-    v8::String::Utf8Value path_val(isolate, args[0]);
+    v8::String::Utf8Value path_val(p_isolate, args[0]);
     args.GetReturnValue().Set(fs::exists(std::string(*path_val)));
 }
 
-v8::Local<v8::Object> FS::CreateStats(v8::Isolate* isolate, const fs::path& path, std::error_code& ec, bool follow_symlink) {
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+v8::Local<v8::Object>
+FS::createStats(v8::Isolate* p_isolate, const fs::path& path, std::error_code& ec, bool follow_symlink) {
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
     auto status = follow_symlink ? fs::status(path, ec) : fs::symlink_status(path, ec);
-    
-    v8::Local<v8::Object> stats = v8::Object::New(isolate);
-    
+
+    v8::Local<v8::Object> stats = v8::Object::New(p_isolate);
+
     // Add properties
-    stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "size"), v8::Number::New(isolate, static_cast<double>(fs::exists(status) && fs::is_regular_file(status) ? fs::file_size(path, ec) : 0))).Check();
-    
-    auto mtime = follow_symlink ? fs::last_write_time(path, ec) : fs::last_write_time(path, ec); // std::filesystem doesn't have symlink_last_write_time? 
+    stats
+        ->Set(p_context,
+              v8::String::NewFromUtf8Literal(p_isolate, "size"),
+              v8::Number::New(
+                  p_isolate,
+                  static_cast<double>(fs::exists(status) && fs::is_regular_file(status) ? fs::file_size(path, ec) : 0)))
+        .Check();
+
+    auto mtime = follow_symlink ? fs::last_write_time(path, ec) : fs::last_write_time(path, ec);
     if (!ec) {
         // Correct conversion to UNIX timestamp (ms)
-        auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(mtime - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
-        double ms = static_cast<double>(std::chrono::time_point_cast<std::chrono::milliseconds>(sctp).time_since_epoch().count());
+        auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+            mtime - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
+        double ms = static_cast<double>(
+            std::chrono::time_point_cast<std::chrono::milliseconds>(sctp).time_since_epoch().count());
 
-        stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "mtime"), v8::Date::New(context, ms).ToLocalChecked()).Check();
-        stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "mtimeMs"), v8::Number::New(isolate, ms)).Check();
+        stats
+            ->Set(p_context,
+                  v8::String::NewFromUtf8Literal(p_isolate, "mtime"),
+                  v8::Date::New(p_context, ms).ToLocalChecked())
+            .Check();
+        stats->Set(p_context, v8::String::NewFromUtf8Literal(p_isolate, "mtimeMs"), v8::Number::New(p_isolate, ms))
+            .Check();
     }
 
     // Add methods (Simplified)
-    stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "isDirectory"), 
-        v8::FunctionTemplate::New(isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
-            args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
-        }, v8::Boolean::New(isolate, fs::is_directory(status)))->GetFunction(context).ToLocalChecked()).Check();
+    stats
+        ->Set(p_context,
+              v8::String::NewFromUtf8Literal(p_isolate, "isDirectory"),
+              v8::FunctionTemplate::New(
+                  p_isolate,
+                  [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+                      args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
+                  },
+                  v8::Boolean::New(p_isolate, fs::is_directory(status)))
+                  ->GetFunction(p_context)
+                  .ToLocalChecked())
+        .Check();
 
-    stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "isFile"), 
-        v8::FunctionTemplate::New(isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
-            args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
-        }, v8::Boolean::New(isolate, fs::is_regular_file(status)))->GetFunction(context).ToLocalChecked()).Check();
+    stats
+        ->Set(p_context,
+              v8::String::NewFromUtf8Literal(p_isolate, "isFile"),
+              v8::FunctionTemplate::New(
+                  p_isolate,
+                  [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+                      args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
+                  },
+                  v8::Boolean::New(p_isolate, fs::is_regular_file(status)))
+                  ->GetFunction(p_context)
+                  .ToLocalChecked())
+        .Check();
 
-    stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "isSymbolicLink"), 
-        v8::FunctionTemplate::New(isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
-            args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
-        }, v8::Boolean::New(isolate, fs::is_symlink(status)))->GetFunction(context).ToLocalChecked()).Check();
+    stats
+        ->Set(p_context,
+              v8::String::NewFromUtf8Literal(p_isolate, "isSymbolicLink"),
+              v8::FunctionTemplate::New(
+                  p_isolate,
+                  [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+                      args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
+                  },
+                  v8::Boolean::New(p_isolate, fs::is_symlink(status)))
+                  ->GetFunction(p_context)
+                  .ToLocalChecked())
+        .Check();
 
     return stats;
 }
 
-void FS::StatSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::statSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
 
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string").ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value path_val(isolate, args[0]);
+    v8::String::Utf8Value path_val(p_isolate, args[0]);
     std::error_code ec;
-    auto stats = CreateStats(isolate, *path_val, ec, true);
-    
+    auto stats = createStats(p_isolate, *path_val, ec, true);
+
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error: " + ec.message()).c_str()).ToLocalChecked());
         return;
     }
 
     args.GetReturnValue().Set(stats);
 }
 
-void FS::MkdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::mkdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
 
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string").ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value path_val(isolate, args[0]);
+    v8::String::Utf8Value path_val(p_isolate, args[0]);
     std::string path(*path_val);
     std::error_code ec;
 
@@ -353,21 +461,23 @@ void FS::MkdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     fs::create_directories(path, ec);
 
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error creating directory: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error creating directory: " + ec.message()).c_str()).ToLocalChecked());
         return;
     }
 }
 
-void FS::RmSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::rmSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
 
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string").ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value path_val(isolate, args[0]);
+    v8::String::Utf8Value path_val(p_isolate, args[0]);
     std::string path(*path_val);
     std::error_code ec;
 
@@ -375,239 +485,268 @@ void FS::RmSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     fs::remove_all(path, ec);
 
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error removing path: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error removing path: " + ec.message()).c_str()).ToLocalChecked());
         return;
     }
 }
 
-
-void FS::LstatSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::lstatSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
 
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string").ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value path_val(isolate, args[0]);
+    v8::String::Utf8Value path_val(p_isolate, args[0]);
     std::error_code ec;
-    auto stats = CreateStats(isolate, *path_val, ec, false);
-    
+    auto stats = createStats(p_isolate, *path_val, ec, false);
+
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error: " + ec.message()).c_str()).ToLocalChecked());
         return;
     }
 
     args.GetReturnValue().Set(stats);
 }
 
-void FS::ReaddirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::readdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
 
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string").ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value path_val(isolate, args[0]);
+    v8::String::Utf8Value path_val(p_isolate, args[0]);
     std::string path(*path_val);
     std::error_code ec;
 
     std::vector<v8::Local<v8::Value>> entries;
     for (const auto& entry : fs::directory_iterator(path, ec)) {
-        entries.push_back(v8::String::NewFromUtf8(isolate, entry.path().filename().string().c_str()).ToLocalChecked());
+        entries.push_back(
+            v8::String::NewFromUtf8(p_isolate, entry.path().filename().string().c_str()).ToLocalChecked());
     }
 
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error reading directory: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error reading directory: " + ec.message()).c_str()).ToLocalChecked());
         return;
     }
 
-    args.GetReturnValue().Set(v8::Array::New(isolate, entries.data(), (int)entries.size()));
+    args.GetReturnValue().Set(v8::Array::New(p_isolate, entries.data(), static_cast<int32_t>(entries.size())));
 }
 
-void FS::RenameSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::renameSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
 
     if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Old and new paths must be strings").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Old and new paths must be strings").ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value old_path(isolate, args[0]);
-    v8::String::Utf8Value new_path(isolate, args[1]);
+    v8::String::Utf8Value old_path(p_isolate, args[0]);
+    v8::String::Utf8Value new_path(p_isolate, args[1]);
     std::error_code ec;
 
     fs::rename(*old_path, *new_path, ec);
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error renaming: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error renaming: " + ec.message()).c_str()).ToLocalChecked());
     }
 }
 
-void FS::CopyFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::copyFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
 
     if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Source and destination paths must be strings").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Source and destination paths must be strings")
+                .ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value src(isolate, args[0]);
-    v8::String::Utf8Value dest(isolate, args[1]);
+    v8::String::Utf8Value src(p_isolate, args[0]);
+    v8::String::Utf8Value dest(p_isolate, args[1]);
     std::error_code ec;
 
     fs::copy_file(*src, *dest, fs::copy_options::overwrite_existing, ec);
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error copying file: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error copying file: " + ec.message()).c_str()).ToLocalChecked());
     }
 }
 
-void FS::RealpathSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::realpathSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
 
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string").ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value path(isolate, args[0]);
+    v8::String::Utf8Value path(p_isolate, args[0]);
     std::error_code ec;
 
     fs::path p = fs::canonical(*path, ec); // Canonical is good for realpath
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error resolving realpath: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error resolving realpath: " + ec.message()).c_str()).ToLocalChecked());
         return;
     }
 
-    args.GetReturnValue().Set(v8::String::NewFromUtf8(isolate, p.string().c_str()).ToLocalChecked());
+    args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, p.string().c_str()).ToLocalChecked());
 }
 
-void FS::AccessSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::accessSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
 
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string").ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value path(isolate, args[0]);
+    v8::String::Utf8Value path(p_isolate, args[0]);
     std::error_code ec;
 
     if (!fs::exists(*path, ec)) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Error: ENOENT: no such file or directory").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "Error: ENOENT: no such file or directory").ToLocalChecked());
         return;
     }
 }
 
-void FS::RmdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::rmdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string").ToLocalChecked());
         return;
     }
-    v8::String::Utf8Value path(isolate, args[0]);
+    v8::String::Utf8Value path(p_isolate, args[0]);
     std::error_code ec;
     fs::remove(*path, ec);
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error rmdir: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error rmdir: " + ec.message()).c_str()).ToLocalChecked());
     }
 }
 
-void FS::UnlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::unlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string").ToLocalChecked());
         return;
     }
-    v8::String::Utf8Value path(isolate, args[0]);
+    v8::String::Utf8Value path(p_isolate, args[0]);
     std::error_code ec;
     fs::remove(*path, ec);
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error unlink: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error unlink: " + ec.message()).c_str()).ToLocalChecked());
     }
 }
 
-void FS::ChmodSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+void FS::chmodSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
     if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsInt32()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string and mode must be an integer").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string and mode must be an integer")
+                .ToLocalChecked());
         return;
     }
-    v8::String::Utf8Value path(isolate, args[0]);
-    int mode = args[1]->Int32Value(context).FromMaybe(0);
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    int32_t mode = args[1]->Int32Value(p_context).FromMaybe(0);
     std::error_code ec;
     fs::permissions(*path, static_cast<fs::perms>(mode), ec);
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error chmod: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error chmod: " + ec.message()).c_str()).ToLocalChecked());
         return;
     }
 }
 
-void FS::ChownSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+void FS::chownSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     // std::filesystem doesn't support chown easily, would need platform specific code (POSIX)
-    v8::Isolate* isolate = args.GetIsolate();
-    isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Error: chown is not supported on this platform or by std::filesystem").ToLocalChecked());
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(
+        v8::String::NewFromUtf8(p_isolate, "Error: chown is not supported on this platform or by std::filesystem")
+            .ToLocalChecked());
     return;
 }
 
-void FS::UtimesSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+void FS::utimesSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
     if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsNumber() || !args[2]->IsNumber()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string, atime and mtime must be numbers").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string, atime and mtime must be numbers")
+                .ToLocalChecked());
         return;
     }
-    v8::String::Utf8Value path(isolate, args[0]);
-    double atime = args[1]->NumberValue(context).FromMaybe(0);
-    double mtime = args[2]->NumberValue(context).FromMaybe(0);
-    
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    double atime = args[1]->NumberValue(p_context).FromMaybe(0);
+    double mtime = args[2]->NumberValue(p_context).FromMaybe(0);
+
     std::error_code ec;
     // Note: std::filesystem only supports last_write_time (mtime), not atime directly.
     // For full utimes functionality, platform-specific APIs would be needed.
-    fs::last_write_time(*path, V8MillisecondsToFileTime(mtime), ec); 
+    fs::last_write_time(*path, V8MillisecondsToFileTime(mtime), ec);
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error setting times: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error setting times: " + ec.message()).c_str()).ToLocalChecked());
         return;
     }
 }
 
-void FS::ReadlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::readlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string").ToLocalChecked());
         return;
     }
-    v8::String::Utf8Value path(isolate, args[0]);
+    v8::String::Utf8Value path(p_isolate, args[0]);
     std::error_code ec;
     fs::path target = fs::read_symlink(*path, ec);
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error readlink: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error readlink: " + ec.message()).c_str()).ToLocalChecked());
         return;
     }
-    args.GetReturnValue().Set(v8::String::NewFromUtf8(isolate, target.string().c_str()).ToLocalChecked());
+    args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, target.string().c_str()).ToLocalChecked());
 }
 
-void FS::SymlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::symlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
     if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Target and path must be strings").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Target and path must be strings").ToLocalChecked());
         return;
     }
-    v8::String::Utf8Value target_val(isolate, args[0]);
-    v8::String::Utf8Value path_val(isolate, args[1]);
+    v8::String::Utf8Value target_val(p_isolate, args[0]);
+    v8::String::Utf8Value path_val(p_isolate, args[1]);
     std::string target_str = *target_val;
     std::string path_str = *path_val;
     std::error_code ec;
@@ -617,7 +756,7 @@ void FS::SymlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     // A more robust implementation would parse "dir", "file", "junction" from args[2].
     bool is_dir_symlink = false;
     if (args.Length() >= 3 && args[2]->IsString()) {
-        v8::String::Utf8Value type_val(isolate, args[2]);
+        v8::String::Utf8Value type_val(p_isolate, args[2]);
         std::string type_str = *type_val;
         if (type_str == "dir" || type_str == "junction") {
             is_dir_symlink = true;
@@ -638,2355 +777,2778 @@ void FS::SymlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     } else {
         fs::create_symlink(target_str, path_str, ec);
     }
-    
+
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error symlink: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error symlink: " + ec.message()).c_str()).ToLocalChecked());
         return;
     }
 }
 
-void FS::LinkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
+void FS::linkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
     if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Target and path must be strings").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Target and path must be strings").ToLocalChecked());
         return;
     }
-    v8::String::Utf8Value target(isolate, args[0]);
-    v8::String::Utf8Value path(isolate, args[1]);
+    v8::String::Utf8Value target(p_isolate, args[0]);
+    v8::String::Utf8Value path(p_isolate, args[1]);
     std::error_code ec;
     fs::create_hard_link(*target, *path, ec);
     if (ec) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, ("Error link: " + ec.message()).c_str()).ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, ("Error link: " + ec.message()).c_str()).ToLocalChecked());
         return;
     }
 }
 
-void FS::TruncateSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
-    if (args.Length() < 1 || !args[0]->IsString()) return;
-    v8::String::Utf8Value path(isolate, args[0]);
+void FS::truncateSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
+    v8::String::Utf8Value path(p_isolate, args[0]);
     uintmax_t length = 0;
-    if (args.Length() >= 2 && args[1]->IsNumber()) length = static_cast<uintmax_t>(args[1]->NumberValue(isolate->GetCurrentContext()).FromMaybe(0));
+    if (args.Length() >= 2 && args[1]->IsNumber())
+        length = static_cast<uintmax_t>(args[1]->NumberValue(p_isolate->GetCurrentContext()).FromMaybe(0));
     std::error_code ec;
     fs::resize_file(*path, length, ec);
 }
 
-void FS::OpenSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
-    auto context = isolate->GetCurrentContext();
+void FS::openSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
 
     if (args.Length() < 1 || !args[0]->IsString()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Path must be a string").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path must be a string").ToLocalChecked());
         return;
     }
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    int flags = 0;
-    
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    int32_t flags = 0;
+
     if (args.Length() >= 2) {
         if (args[1]->IsInt32()) {
-            flags = args[1]->Int32Value(context).FromMaybe(0);
+            flags = args[1]->Int32Value(p_context).FromMaybe(0);
         } else if (args[1]->IsString()) {
-            v8::String::Utf8Value flags_str(isolate, args[1]);
+            v8::String::Utf8Value flags_str(p_isolate, args[1]);
             std::string f(*flags_str);
-            if (f == "r") flags = O_RDONLY;
-            else if (f == "r+") flags = O_RDWR;
-            else if (f == "w") flags = O_WRONLY | O_CREAT | O_TRUNC;
-            else if (f == "w+") flags = O_RDWR | O_CREAT | O_TRUNC;
-            else if (f == "a") flags = O_WRONLY | O_CREAT | O_APPEND;
-            else if (f == "a+") flags = O_RDWR | O_CREAT | O_APPEND;
-            else flags = O_RDONLY;
+            if (f == "r")
+                flags = O_RDONLY;
+            else if (f == "r+")
+                flags = O_RDWR;
+            else if (f == "w")
+                flags = O_WRONLY | O_CREAT | O_TRUNC;
+            else if (f == "w+")
+                flags = O_RDWR | O_CREAT | O_TRUNC;
+            else if (f == "a")
+                flags = O_WRONLY | O_CREAT | O_APPEND;
+            else if (f == "a+")
+                flags = O_RDWR | O_CREAT | O_APPEND;
+            else
+                flags = O_RDONLY;
         }
     } else {
         flags = O_RDONLY;
     }
 
-    int mode = 0666;
+    int32_t mode = 0666;
     if (args.Length() >= 3 && args[2]->IsInt32()) {
-        mode = args[2]->Int32Value(context).FromMaybe(0666);
+        mode = args[2]->Int32Value(p_context).FromMaybe(0666);
     }
 
 #ifdef _WIN32
     // On Windows, we need _O_BINARY usually for node compatibility
-    int fd = _open(*path, flags | _O_BINARY, mode);
+    int32_t fd = _open(*path, flags | _O_BINARY, mode);
 #else
-    int fd = open(*path, flags, mode);
+    int32_t fd = open(*path, flags, mode);
 #endif
 
     if (fd == -1) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Error: Could not open file").ToLocalChecked());
+        p_isolate->ThrowException(v8::String::NewFromUtf8(p_isolate, "Error: Could not open file").ToLocalChecked());
         return;
     }
 
     args.GetReturnValue().Set(fd);
 }
 
-void FS::ReadSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
-    auto context = isolate->GetCurrentContext();
+void FS::readSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
 
     if (args.Length() < 2 || !args[0]->IsInt32() || !args[1]->IsUint8Array()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Invalid arguments").ToLocalChecked());
+        p_isolate->ThrowException(v8::String::NewFromUtf8(p_isolate, "TypeError: Invalid arguments").ToLocalChecked());
         return;
     }
 
-    int fd = args[0]->Int32Value(context).FromMaybe(-1);
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
     v8::Local<v8::Uint8Array> buffer = args[1].As<v8::Uint8Array>();
-    
+
     size_t offset = 0;
     if (args.Length() >= 3 && args[2]->IsNumber()) {
-        offset = static_cast<size_t>(args[2]->NumberValue(context).FromMaybe(0));
+        offset = static_cast<size_t>(args[2]->NumberValue(p_context).FromMaybe(0));
     }
 
     size_t length = buffer->ByteLength() - offset;
     if (args.Length() >= 4 && args[3]->IsNumber()) {
-        length = static_cast<size_t>(args[3]->NumberValue(context).FromMaybe(length));
+        length = static_cast<size_t>(args[3]->NumberValue(p_context).FromMaybe(static_cast<double>(length)));
     }
 
     int64_t position = -1;
     if (args.Length() >= 5 && args[4]->IsNumber()) {
-        position = static_cast<int64_t>(args[4]->NumberValue(context).FromMaybe(-1));
+        position = static_cast<int64_t>(args[4]->NumberValue(p_context).FromMaybe(-1));
     }
 
-    char* data = static_cast<char*>(buffer->Buffer()->GetBackingStore()->Data()) + buffer->ByteOffset() + offset;
+    char* p_data = static_cast<char*>(buffer->Buffer()->GetBackingStore()->Data()) + buffer->ByteOffset() + offset;
 
 #ifdef _WIN32
     if (position != -1) {
         _lseeki64(fd, position, SEEK_SET);
     }
-    int bytesRead = _read(fd, data, (unsigned int)length);
+    int32_t bytes_read = _read(fd, p_data, static_cast<uint32_t>(length));
 #else
-    ssize_t bytesRead;
+    ssize_t bytes_read;
     if (position != -1) {
-        bytesRead = pread(fd, data, length, position);
+        bytes_read = pread(fd, p_data, length, position);
     } else {
-        bytesRead = read(fd, data, length);
+        bytes_read = read(fd, p_data, length);
     }
 #endif
 
-    if (bytesRead == -1) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Error: Could not read from file").ToLocalChecked());
+    if (bytes_read == -1) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "Error: Could not read from file").ToLocalChecked());
         return;
     }
 
-    args.GetReturnValue().Set(bytesRead);
+    args.GetReturnValue().Set(static_cast<int32_t>(bytes_read));
 }
 
-void FS::WriteSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
-    auto context = isolate->GetCurrentContext();
+void FS::writeSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
 
     if (args.Length() < 2 || !args[0]->IsInt32()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Invalid arguments").ToLocalChecked());
+        p_isolate->ThrowException(v8::String::NewFromUtf8(p_isolate, "TypeError: Invalid arguments").ToLocalChecked());
         return;
     }
 
-    int fd = args[0]->Int32Value(context).FromMaybe(-1);
-    
-    const char* data = nullptr;
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+
+    const char* p_data = nullptr;
     size_t length = 0;
     std::string str_data;
 
     if (args[1]->IsString()) {
-        v8::String::Utf8Value utf8(isolate, args[1]);
+        v8::String::Utf8Value utf8(p_isolate, args[1]);
         str_data = *utf8;
-        data = str_data.c_str();
+        p_data = str_data.c_str();
         length = str_data.length();
     } else if (args[1]->IsUint8Array()) {
         v8::Local<v8::Uint8Array> buffer = args[1].As<v8::Uint8Array>();
-        data = static_cast<const char*>(buffer->Buffer()->GetBackingStore()->Data()) + buffer->ByteOffset();
+        p_data = static_cast<const char*>(buffer->Buffer()->GetBackingStore()->Data()) + buffer->ByteOffset();
         length = buffer->ByteLength();
     } else {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: Data must be a string or Uint8Array").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Data must be a string or Uint8Array").ToLocalChecked());
         return;
     }
 
     int64_t position = -1;
     if (args.Length() >= 3 && args[2]->IsNumber()) {
-        position = static_cast<int64_t>(args[2]->NumberValue(context).FromMaybe(-1));
+        position = static_cast<int64_t>(args[2]->NumberValue(p_context).FromMaybe(-1));
     }
 
 #ifdef _WIN32
     if (position != -1) {
         _lseeki64(fd, position, SEEK_SET);
     }
-    int bytesWritten = _write(fd, data, (unsigned int)length);
+    int32_t bytes_written = _write(fd, p_data, static_cast<uint32_t>(length));
 #else
-    ssize_t bytesWritten;
+    ssize_t bytes_written;
     if (position != -1) {
-        bytesWritten = pwrite(fd, data, length, position);
+        bytes_written = pwrite(fd, p_data, length, position);
     } else {
-        bytesWritten = write(fd, data, length);
+        bytes_written = write(fd, p_data, length);
     }
 #endif
 
-    if (bytesWritten == -1) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Error: Could not write to file").ToLocalChecked());
+    if (bytes_written == -1) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "Error: Could not write to file").ToLocalChecked());
         return;
     }
 
-    args.GetReturnValue().Set(bytesWritten);
+    args.GetReturnValue().Set(static_cast<int32_t>(bytes_written));
 }
 
-void FS::CloseSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
-    auto context = isolate->GetCurrentContext();
+void FS::closeSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
 
     if (args.Length() < 1 || !args[0]->IsInt32()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: FD must be an integer").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: FD must be an integer").ToLocalChecked());
         return;
     }
 
-    int fd = args[0]->Int32Value(context).FromMaybe(-1);
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
 #ifdef _WIN32
-    int result = _close(fd);
+    int32_t result = _close(fd);
 #else
-    int result = close(fd);
+    int32_t result = close(fd);
 #endif
 
     if (result == -1) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Error: Could not close file").ToLocalChecked());
+        p_isolate->ThrowException(v8::String::NewFromUtf8(p_isolate, "Error: Could not close file").ToLocalChecked());
         return;
     }
 }
 
 // Async Context for ReadFile
-struct ReadFileContext {
-    std::string path;
-    std::string encoding;
-    std::string content;
-    std::vector<char> binary_content;
-    bool is_error = false;
-    std::string error_msg;
+struct ReadFileCtx {
+    std::string m_path;
+    std::string m_encoding;
+    std::string m_content;
+    std::vector<char> m_binary_content;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::ReadFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::readFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new ReadFileContext();
-    ctx->path = *path;
+    auto p_ctx = new ReadFileCtx();
+    p_ctx->m_path = *path;
 
     if (args.Length() >= 2 && args[1]->IsString()) {
-        v8::String::Utf8Value enc_val(isolate, args[1]);
-        ctx->encoding = *enc_val;
+        v8::String::Utf8Value enc_val(p_isolate, args[1]);
+        p_ctx->m_encoding = *enc_val;
     } else if (args.Length() >= 2 && args[1]->IsObject()) {
-        v8::Local<v8::Object> options = args[1].As<v8::Object>();
-        v8::Local<v8::Value> enc_opt;
-        if (options->Get(isolate->GetCurrentContext(), v8::String::NewFromUtf8Literal(isolate, "encoding")).ToLocal(&enc_opt) && enc_opt->IsString()) {
-            v8::String::Utf8Value enc_val(isolate, enc_opt);
-            ctx->encoding = *enc_val;
+        v8::Local<v8::Object> p_options = args[1].As<v8::Object>();
+        v8::Local<v8::Value> p_enc_opt;
+        if (p_options->Get(p_isolate->GetCurrentContext(), v8::String::NewFromUtf8Literal(p_isolate, "encoding"))
+                .ToLocal(&p_enc_opt) &&
+            p_enc_opt->IsString()) {
+            v8::String::Utf8Value enc_val(p_isolate, p_enc_opt);
+            p_ctx->m_encoding = *enc_val;
         }
     }
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<ReadFileContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ReadFileCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
             argv[1] = v8::Undefined(isolate);
         } else {
             argv[0] = v8::Null(isolate);
-            if (ctx->encoding == "utf8") {
-                argv[1] = v8::String::NewFromUtf8(isolate, ctx->binary_content.data(), v8::NewStringType::kNormal, (int)ctx->binary_content.size()).ToLocalChecked();
+            if (p_ctx->m_encoding == "utf8") {
+                argv[1] = v8::String::NewFromUtf8(isolate,
+                                                  p_ctx->m_binary_content.data(),
+                                                  v8::NewStringType::kNormal,
+                                                  static_cast<int32_t>(p_ctx->m_binary_content.size()))
+                              .ToLocalChecked();
             } else {
-                v8::Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(isolate, ctx->binary_content.size());
-                memcpy(ab->GetBackingStore()->Data(), ctx->binary_content.data(), ctx->binary_content.size());
-                argv[1] = v8::Uint8Array::New(ab, 0, ctx->binary_content.size());
+                v8::Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(isolate, p_ctx->m_binary_content.size());
+                memcpy(ab->GetBackingStore()->Data(), p_ctx->m_binary_content.data(), p_ctx->m_binary_content.size());
+                argv[1] = v8::Uint8Array::New(ab, 0, p_ctx->m_binary_content.size());
             }
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-        std::ifstream file(ctx->path, std::ios::binary | std::ios::ate);
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::ifstream file(p_ctx->m_path, std::ios::binary | std::ios::ate);
         if (!file.is_open()) {
-            ctx->is_error = true;
-            ctx->error_msg = "ENOENT: no such file or directory";
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "ENOENT: no such file or directory";
         } else {
             std::streamsize size = file.tellg();
             file.seekg(0, std::ios::beg);
-            ctx->binary_content.resize(size);
-            file.read(ctx->binary_content.data(), size);
+            p_ctx->m_binary_content.resize(static_cast<size_t>(size));
+            file.read(p_ctx->m_binary_content.data(), size);
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::ReadFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsString()) return;
+void FS::readFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    auto ctx = new ReadFileContext();
-    ctx->path = *path;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new ReadFileCtx();
+    p_ctx->m_path = *path;
 
     if (args.Length() >= 2 && args[1]->IsString()) {
-        v8::String::Utf8Value enc_val(isolate, args[1]);
-        ctx->encoding = *enc_val;
+        v8::String::Utf8Value enc_val(p_isolate, args[1]);
+        p_ctx->m_encoding = *enc_val;
     } else if (args.Length() >= 2 && args[1]->IsObject()) {
-        v8::Local<v8::Object> options = args[1].As<v8::Object>();
-        v8::Local<v8::Value> enc_opt;
-        if (options->Get(context, v8::String::NewFromUtf8Literal(isolate, "encoding")).ToLocal(&enc_opt) && enc_opt->IsString()) {
-            v8::String::Utf8Value enc_val(isolate, enc_opt);
-            ctx->encoding = *enc_val;
+        v8::Local<v8::Object> p_options = args[1].As<v8::Object>();
+        v8::Local<v8::Value> p_enc_opt;
+        if (p_options->Get(p_context, v8::String::NewFromUtf8Literal(p_isolate, "encoding")).ToLocal(&p_enc_opt) &&
+            p_enc_opt->IsString()) {
+            v8::String::Utf8Value enc_val(p_isolate, p_enc_opt);
+            p_ctx->m_encoding = *enc_val;
         }
     }
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<ReadFileContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ReadFileCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            if (ctx->encoding == "utf8") {
-                resolver->Resolve(context, v8::String::NewFromUtf8(isolate, ctx->binary_content.data(), v8::NewStringType::kNormal, (int)ctx->binary_content.size()).ToLocalChecked()).Check();
+            if (p_ctx->m_encoding == "utf8") {
+                p_resolver
+                    ->Resolve(context,
+                              v8::String::NewFromUtf8(isolate,
+                                                      p_ctx->m_binary_content.data(),
+                                                      v8::NewStringType::kNormal,
+                                                      static_cast<int32_t>(p_ctx->m_binary_content.size()))
+                                  .ToLocalChecked())
+                    .Check();
             } else {
-                v8::Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(isolate, ctx->binary_content.size());
-                memcpy(ab->GetBackingStore()->Data(), ctx->binary_content.data(), ctx->binary_content.size());
-                resolver->Resolve(context, v8::Uint8Array::New(ab, 0, ctx->binary_content.size())).Check();
+                v8::Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(isolate, p_ctx->m_binary_content.size());
+                memcpy(ab->GetBackingStore()->Data(), p_ctx->m_binary_content.data(), p_ctx->m_binary_content.size());
+                p_resolver->Resolve(context, v8::Uint8Array::New(ab, 0, p_ctx->m_binary_content.size())).Check();
             }
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-        std::ifstream file(ctx->path, std::ios::binary | std::ios::ate);
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::ifstream file(p_ctx->m_path, std::ios::binary | std::ios::ate);
         if (!file.is_open()) {
-            ctx->is_error = true;
-            ctx->error_msg = "ENOENT: no such file or directory";
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "ENOENT: no such file or directory";
         } else {
             std::streamsize size = file.tellg();
             file.seekg(0, std::ios::beg);
-            ctx->binary_content.resize(size);
-            file.read(ctx->binary_content.data(), size);
+            p_ctx->m_binary_content.resize(static_cast<size_t>(size));
+            file.read(p_ctx->m_binary_content.data(), size);
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-struct WriteFileContext {
-    std::string path;
-    std::string content;
-    std::vector<char> binary_content;
-    bool is_binary = false;
-    bool is_error = false;
-    std::string error_msg;
+struct WriteFileCtx {
+    std::string m_path;
+    std::string m_content;
+    std::vector<char> m_binary_content;
+    bool m_is_binary = false;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::WriteFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 3 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::writeFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new WriteFileContext();
-    ctx->path = *path;
+    auto p_ctx = new WriteFileCtx();
+    p_ctx->m_path = *path;
 
     if (args[1]->IsString()) {
-        v8::String::Utf8Value content(isolate, args[1]);
-        ctx->content = *content;
-        ctx->is_binary = false;
+        v8::String::Utf8Value content(p_isolate, args[1]);
+        p_ctx->m_content = *content;
+        p_ctx->m_is_binary = false;
     } else if (args[1]->IsUint8Array()) {
         v8::Local<v8::Uint8Array> uint8 = args[1].As<v8::Uint8Array>();
-        ctx->binary_content.resize(uint8->ByteLength());
-        uint8->CopyContents(ctx->binary_content.data(), uint8->ByteLength());
-        ctx->is_binary = true;
+        p_ctx->m_binary_content.resize(uint8->ByteLength());
+        uint8->CopyContents(p_ctx->m_binary_content.data(), uint8->ByteLength());
+        p_ctx->m_is_binary = true;
     }
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<WriteFileContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<WriteFileCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-        std::ofstream file(ctx->path, std::ios::binary);
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::ofstream file(p_ctx->m_path, std::ios::binary);
         if (!file.is_open()) {
-            ctx->is_error = true;
-            ctx->error_msg = "Could not open file for writing";
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "Could not open file for writing";
         } else {
-            if (ctx->is_binary) {
-                file.write(ctx->binary_content.data(), ctx->binary_content.size());
+            if (p_ctx->m_is_binary) {
+                file.write(p_ctx->m_binary_content.data(), p_ctx->m_binary_content.size());
             } else {
-                file.write(ctx->content.c_str(), ctx->content.size());
+                file.write(p_ctx->m_content.c_str(), p_ctx->m_content.size());
             }
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::WriteFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 2 || !args[0]->IsString()) return;
+void FS::writeFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    auto ctx = new WriteFileContext();
-    ctx->path = *path;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new WriteFileCtx();
+    p_ctx->m_path = *path;
 
     if (args[1]->IsString()) {
-        v8::String::Utf8Value content(isolate, args[1]);
-        ctx->content = *content;
-        ctx->is_binary = false;
+        v8::String::Utf8Value content(p_isolate, args[1]);
+        p_ctx->m_content = *content;
+        p_ctx->m_is_binary = false;
     } else if (args[1]->IsUint8Array()) {
         v8::Local<v8::Uint8Array> uint8 = args[1].As<v8::Uint8Array>();
-        ctx->binary_content.resize(uint8->ByteLength());
-        uint8->CopyContents(ctx->binary_content.data(), uint8->ByteLength());
-        ctx->is_binary = true;
+        p_ctx->m_binary_content.resize(uint8->ByteLength());
+        uint8->CopyContents(p_ctx->m_binary_content.data(), uint8->ByteLength());
+        p_ctx->m_is_binary = true;
     }
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<WriteFileContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<WriteFileCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-        std::ofstream file(ctx->path, std::ios::binary);
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::ofstream file(p_ctx->m_path, std::ios::binary);
         if (!file.is_open()) {
-            ctx->is_error = true;
-            ctx->error_msg = "Could not open file for writing";
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "Could not open file for writing";
         } else {
-            if (ctx->is_binary) {
-                file.write(ctx->binary_content.data(), ctx->binary_content.size());
+            if (p_ctx->m_is_binary) {
+                file.write(p_ctx->m_binary_content.data(), p_ctx->m_binary_content.size());
             } else {
-                file.write(ctx->content.c_str(), ctx->content.size());
+                file.write(p_ctx->m_content.c_str(), p_ctx->m_content.size());
             }
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-struct StatContext {
-    std::string path;
-    bool is_error = false;
-    std::string error_msg;
-    bool follow_symlink = true;
-    std::error_code ec;
+struct StatCtx {
+    std::string m_path;
+    bool m_is_error = false;
+    std::string m_error_msg;
+    bool m_follow_symlink = true;
+    std::error_code m_ec;
 };
 
-void FS::Stat(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::stat(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new StatContext();
-    ctx->path = *path;
+    auto p_ctx = new StatCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<StatContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<StatCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
             argv[1] = v8::Undefined(isolate);
         } else {
             argv[0] = v8::Null(isolate);
-            argv[1] = FS::CreateStats(isolate, ctx->path, ctx->ec, ctx->follow_symlink);
+            argv[1] = FS::createStats(isolate, p_ctx->m_path, p_ctx->m_ec, p_ctx->m_follow_symlink);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-        if (!fs::exists(ctx->path, ctx->ec)) {
-            ctx->is_error = true;
-            ctx->error_msg = "ENOENT: no such file or directory";
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        if (!fs::exists(p_ctx->m_path, p_ctx->m_ec)) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "ENOENT: no such file or directory";
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::StatPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsString()) return;
+void FS::statPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    auto ctx = new StatContext();
-    ctx->path = *path;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new StatCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<StatContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<StatCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, FS::CreateStats(isolate, ctx->path, ctx->ec, ctx->follow_symlink)).Check();
+            p_resolver->Resolve(context, FS::createStats(isolate, p_ctx->m_path, p_ctx->m_ec, p_ctx->m_follow_symlink))
+                .Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-        if (!fs::exists(ctx->path, ctx->ec)) {
-            ctx->is_error = true;
-            ctx->error_msg = "ENOENT: no such file or directory";
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        if (!fs::exists(p_ctx->m_path, p_ctx->m_ec)) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "ENOENT: no such file or directory";
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-struct UnlinkContext {
-    std::string path;
-    bool is_error = false;
-    std::string error_msg;
+struct UnlinkCtx {
+    std::string m_path;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Unlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::unlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new UnlinkContext();
-    ctx->path = *path;
+    auto p_ctx = new UnlinkCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<UnlinkContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<UnlinkCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        if (!fs::remove(ctx->path, ec)) {
-            ctx->is_error = true;
-            ctx->error_msg = ec ? ec.message() : "Failed to unlink file";
+        if (!fs::remove(p_ctx->m_path, ec)) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec ? ec.message() : "Failed to unlink file";
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::UnlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsString()) return;
+void FS::unlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    auto ctx = new UnlinkContext();
-    ctx->path = *path;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new UnlinkCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<UnlinkContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<UnlinkCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        if (!fs::remove(ctx->path, ec)) {
-            ctx->is_error = true;
-            ctx->error_msg = ec ? ec.message() : "Failed to unlink file";
+        if (!fs::remove(p_ctx->m_path, ec)) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec ? ec.message() : "Failed to unlink file";
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Mkdir ---
-struct MkdirContext {
-    std::string path;
-    bool is_error = false;
-    std::string error_msg;
+struct MkdirCtx {
+    std::string m_path;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Mkdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::mkdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new MkdirContext();
-    ctx->path = *path;
+    auto p_ctx = new MkdirCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<MkdirContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<MkdirCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::create_directories(ctx->path, ec); // Behaves like mkdir -p
+        fs::create_directories(p_ctx->m_path, ec); // Behaves like mkdir -p
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::MkdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsString()) return;
+void FS::mkdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    auto ctx = new MkdirContext();
-    ctx->path = *path;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new MkdirCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<MkdirContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<MkdirCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::create_directories(ctx->path, ec);
+        fs::create_directories(p_ctx->m_path, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Readdir ---
-struct ReaddirContext {
-    std::string path;
-    std::vector<std::string> entries;
-    bool is_error = false;
-    std::string error_msg;
+struct ReaddirCtx {
+    std::string m_path;
+    std::vector<std::string> m_entries;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Readdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::readdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new ReaddirContext();
-    ctx->path = *path;
+    auto p_ctx = new ReaddirCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<ReaddirContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ReaddirCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
             argv[1] = v8::Undefined(isolate);
         } else {
             argv[0] = v8::Null(isolate);
-            v8::Local<v8::Array> array = v8::Array::New(isolate, (int)ctx->entries.size());
-            for (size_t i = 0; i < ctx->entries.size(); ++i) {
-                array->Set(context, (uint32_t)i, v8::String::NewFromUtf8(isolate, ctx->entries[i].c_str()).ToLocalChecked()).Check();
+            v8::Local<v8::Array> array = v8::Array::New(isolate, static_cast<int32_t>(p_ctx->m_entries.size()));
+            for (size_t i = 0; i < p_ctx->m_entries.size(); ++i) {
+                array
+                    ->Set(context,
+                          static_cast<uint32_t>(i),
+                          v8::String::NewFromUtf8(isolate, p_ctx->m_entries[i].c_str()).ToLocalChecked())
+                    .Check();
             }
             argv[1] = array;
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        for (const auto& entry : fs::directory_iterator(ctx->path, ec)) {
-            ctx->entries.push_back(entry.path().filename().string());
+        for (const auto& entry : fs::directory_iterator(p_ctx->m_path, ec)) {
+            p_ctx->m_entries.push_back(entry.path().filename().string());
         }
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::ReaddirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsString()) return;
+void FS::readdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    auto ctx = new ReaddirContext();
-    ctx->path = *path;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new ReaddirCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<ReaddirContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ReaddirCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            v8::Local<v8::Array> array = v8::Array::New(isolate, (int)ctx->entries.size());
-            for (size_t i = 0; i < ctx->entries.size(); ++i) {
-                array->Set(context, (uint32_t)i, v8::String::NewFromUtf8(isolate, ctx->entries[i].c_str()).ToLocalChecked()).Check();
+            v8::Local<v8::Array> array = v8::Array::New(isolate, static_cast<int32_t>(p_ctx->m_entries.size()));
+            for (size_t i = 0; i < p_ctx->m_entries.size(); ++i) {
+                array
+                    ->Set(context,
+                          static_cast<uint32_t>(i),
+                          v8::String::NewFromUtf8(isolate, p_ctx->m_entries[i].c_str()).ToLocalChecked())
+                    .Check();
             }
-            resolver->Resolve(context, array).Check();
+            p_resolver->Resolve(context, array).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        for (const auto& entry : fs::directory_iterator(ctx->path, ec)) {
-            ctx->entries.push_back(entry.path().filename().string());
+        for (const auto& entry : fs::directory_iterator(p_ctx->m_path, ec)) {
+            p_ctx->m_entries.push_back(entry.path().filename().string());
         }
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Rmdir ---
-struct RmdirContext {
-    std::string path;
-    bool is_error = false;
-    std::string error_msg;
+struct RmdirCtx {
+    std::string m_path;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Rmdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::rmdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new RmdirContext();
-    ctx->path = *path;
+    auto p_ctx = new RmdirCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<RmdirContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<RmdirCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::remove(ctx->path, ec); // Standard rmdir (non-recursive in standard fs::remove unless it's empty?) actually fs::remove handles both file and empty dir
-        // Node's rmdir usually expects empty directory. fs::remove also fails if not empty (usually).
+        fs::remove(p_ctx->m_path, ec); // Standard rmdir
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::RmdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsString()) return;
+void FS::rmdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    auto ctx = new RmdirContext();
-    ctx->path = *path;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new RmdirCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<RmdirContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<RmdirCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::remove(ctx->path, ec);
+        fs::remove(p_ctx->m_path, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Rename ---
-struct RenameContext {
-    std::string old_path;
-    std::string new_path;
-    bool is_error = false;
-    std::string error_msg;
+struct RenameCtx {
+    std::string m_old_path;
+    std::string m_new_path;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Rename(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::rename(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value old_path(isolate, args[0]);
-    v8::String::Utf8Value new_path(isolate, args[1]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value old_path(p_isolate, args[0]);
+    v8::String::Utf8Value new_path(p_isolate, args[1]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new RenameContext();
-    ctx->old_path = *old_path;
-    ctx->new_path = *new_path;
+    auto p_ctx = new RenameCtx();
+    p_ctx->m_old_path = *old_path;
+    p_ctx->m_new_path = *new_path;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<RenameContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<RenameCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::rename(ctx->old_path, ctx->new_path, ec);
+        fs::rename(p_ctx->m_old_path, p_ctx->m_new_path, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::RenamePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) return;
+void FS::renamePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value old_path(isolate, args[0]);
-    v8::String::Utf8Value new_path(isolate, args[1]);
-    auto ctx = new RenameContext();
-    ctx->old_path = *old_path;
-    ctx->new_path = *new_path;
+    v8::String::Utf8Value old_path(p_isolate, args[0]);
+    v8::String::Utf8Value new_path(p_isolate, args[1]);
+    auto p_ctx = new RenameCtx();
+    p_ctx->m_old_path = *old_path;
+    p_ctx->m_new_path = *new_path;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<RenameContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<RenameCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::rename(ctx->old_path, ctx->new_path, ec);
+        fs::rename(p_ctx->m_old_path, p_ctx->m_new_path, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- CopyFile ---
-struct CopyFileContext {
-    std::string src;
-    std::string dest;
-    int flags = 0; // Default to overwrite (0)
-    bool is_error = false;
-    std::string error_msg;
+struct CopyFileCtx {
+    std::string m_src;
+    std::string m_dest;
+    int32_t m_flags = 0; // Default to overwrite (0)
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::CopyFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::copyFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value src(isolate, args[0]);
-    v8::String::Utf8Value dest(isolate, args[1]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value src(p_isolate, args[0]);
+    v8::String::Utf8Value dest(p_isolate, args[1]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new CopyFileContext();
-    ctx->src = *src;
-    ctx->dest = *dest;
-    
+    auto p_ctx = new CopyFileCtx();
+    p_ctx->m_src = *src;
+    p_ctx->m_dest = *dest;
+
     if (args.Length() > 3 && args[2]->IsNumber()) {
-        ctx->flags = args[2]->Int32Value(isolate->GetCurrentContext()).FromMaybe(0);
+        p_ctx->m_flags = args[2]->Int32Value(p_isolate->GetCurrentContext()).FromMaybe(0);
     }
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<CopyFileContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<CopyFileCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        auto options = fs::copy_options::overwrite_existing; 
+        auto options = fs::copy_options::overwrite_existing;
         // Need to check flags. Node.js COPYFILE_EXCL = 1, force = 0?
         // Basic impl: always overwrite for now unless we parse flags better
         // TODO: Map Node flags to std::filesystem copy_options
-        
-        fs::copy_file(ctx->src, ctx->dest, options, ec);
+
+        fs::copy_file(p_ctx->m_src, p_ctx->m_dest, options, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::CopyFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) return;
+void FS::copyFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value src(isolate, args[0]);
-    v8::String::Utf8Value dest(isolate, args[1]);
-    auto ctx = new CopyFileContext();
-    ctx->src = *src;
-    ctx->dest = *dest;
+    v8::String::Utf8Value src(p_isolate, args[0]);
+    v8::String::Utf8Value dest(p_isolate, args[1]);
+    auto p_ctx = new CopyFileCtx();
+    p_ctx->m_src = *src;
+    p_ctx->m_dest = *dest;
 
     if (args.Length() > 2 && args[2]->IsNumber()) {
-        ctx->flags = args[2]->Int32Value(context).FromMaybe(0);
+        p_ctx->m_flags = args[2]->Int32Value(p_context).FromMaybe(0);
     }
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<CopyFileContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<CopyFileCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::copy_file(ctx->src, ctx->dest, fs::copy_options::overwrite_existing, ec);
+        fs::copy_file(p_ctx->m_src, p_ctx->m_dest, fs::copy_options::overwrite_existing, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Access ---
-struct AccessContext {
-    std::string path;
-    int mode = 0; // F_OK
-    bool is_error = false;
-    std::string error_msg;
+struct AccessCtx {
+    std::string m_path;
+    int32_t m_mode = 0; // F_OK
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Access(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::access(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new AccessContext();
-    ctx->path = *path;
+    auto p_ctx = new AccessCtx();
+    p_ctx->m_path = *path;
     if (args.Length() > 2 && args[1]->IsNumber()) {
-        ctx->mode = args[1]->Int32Value(isolate->GetCurrentContext()).FromMaybe(0);
+        p_ctx->m_mode = args[1]->Int32Value(p_isolate->GetCurrentContext()).FromMaybe(0);
     }
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<AccessContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<AccessCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        if (!fs::exists(ctx->path, ec)) {
-            ctx->is_error = true;
-            ctx->error_msg = "ENOENT: no such file or directory";
+        if (!fs::exists(p_ctx->m_path, ec)) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "ENOENT: no such file or directory";
         }
         // TODO: Check specific permissions (R_OK, W_OK) if mode > 0
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::AccessPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsString()) return;
+void FS::accessPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    auto ctx = new AccessContext();
-    ctx->path = *path;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new AccessCtx();
+    p_ctx->m_path = *path;
     if (args.Length() > 1 && args[1]->IsNumber()) {
-        ctx->mode = args[1]->Int32Value(context).FromMaybe(0);
+        p_ctx->m_mode = args[1]->Int32Value(p_context).FromMaybe(0);
     }
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<AccessContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<AccessCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        if (!fs::exists(ctx->path, ec)) {
-            ctx->is_error = true;
-            ctx->error_msg = "ENOENT: no such file or directory";
+        if (!fs::exists(p_ctx->m_path, ec)) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "ENOENT: no such file or directory";
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- AppendFile ---
-struct AppendFileContext {
-    std::string path;
-    std::string content;
-    std::vector<char> binary_content;
-    bool is_binary = false;
-    bool is_error = false;
-    std::string error_msg;
+struct AppendFileCtx {
+    std::string m_path;
+    std::string m_content;
+    std::vector<char> m_binary_content;
+    bool m_is_binary = false;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::AppendFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 3 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::appendFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new AppendFileContext();
-    ctx->path = *path;
+    auto p_ctx = new AppendFileCtx();
+    p_ctx->m_path = *path;
 
     if (args[1]->IsString()) {
-        v8::String::Utf8Value content(isolate, args[1]);
-        ctx->content = *content;
-        ctx->is_binary = false;
+        v8::String::Utf8Value content(p_isolate, args[1]);
+        p_ctx->m_content = *content;
+        p_ctx->m_is_binary = false;
     } else if (args[1]->IsUint8Array()) {
         v8::Local<v8::Uint8Array> uint8 = args[1].As<v8::Uint8Array>();
-        ctx->binary_content.resize(uint8->ByteLength());
-        uint8->CopyContents(ctx->binary_content.data(), uint8->ByteLength());
-        ctx->is_binary = true;
+        p_ctx->m_binary_content.resize(uint8->ByteLength());
+        uint8->CopyContents(p_ctx->m_binary_content.data(), uint8->ByteLength());
+        p_ctx->m_is_binary = true;
     }
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<AppendFileContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<AppendFileCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-        std::ofstream file(ctx->path, std::ios::binary | std::ios::app);
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::ofstream file(p_ctx->m_path, std::ios::binary | std::ios::app);
         if (!file.is_open()) {
-            ctx->is_error = true;
-            ctx->error_msg = "Could not open file for appending";
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "Could not open file for appending";
         } else {
-            if (ctx->is_binary) {
-                file.write(ctx->binary_content.data(), ctx->binary_content.size());
+            if (p_ctx->m_is_binary) {
+                file.write(p_ctx->m_binary_content.data(), p_ctx->m_binary_content.size());
             } else {
-                file.write(ctx->content.c_str(), ctx->content.size());
+                file.write(p_ctx->m_content.c_str(), p_ctx->m_content.size());
             }
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::AppendFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 2 || !args[0]->IsString()) return;
+void FS::appendFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    auto ctx = new AppendFileContext();
-    ctx->path = *path;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new AppendFileCtx();
+    p_ctx->m_path = *path;
 
     if (args[1]->IsString()) {
-        v8::String::Utf8Value content(isolate, args[1]);
-        ctx->content = *content;
-        ctx->is_binary = false;
+        v8::String::Utf8Value content(p_isolate, args[1]);
+        p_ctx->m_content = *content;
+        p_ctx->m_is_binary = false;
     } else if (args[1]->IsUint8Array()) {
         v8::Local<v8::Uint8Array> uint8 = args[1].As<v8::Uint8Array>();
-        ctx->binary_content.resize(uint8->ByteLength());
-        uint8->CopyContents(ctx->binary_content.data(), uint8->ByteLength());
-        ctx->is_binary = true;
+        p_ctx->m_binary_content.resize(uint8->ByteLength());
+        uint8->CopyContents(p_ctx->m_binary_content.data(), uint8->ByteLength());
+        p_ctx->m_is_binary = true;
     }
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<AppendFileContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<AppendFileCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-        std::ofstream file(ctx->path, std::ios::binary | std::ios::app);
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::ofstream file(p_ctx->m_path, std::ios::binary | std::ios::app);
         if (!file.is_open()) {
-            ctx->is_error = true;
-            ctx->error_msg = "Could not open file for appending";
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "Could not open file for appending";
         } else {
-            if (ctx->is_binary) {
-                file.write(ctx->binary_content.data(), ctx->binary_content.size());
+            if (p_ctx->m_is_binary) {
+                file.write(p_ctx->m_binary_content.data(), p_ctx->m_binary_content.size());
             } else {
-                file.write(ctx->content.c_str(), ctx->content.size());
+                file.write(p_ctx->m_content.c_str(), p_ctx->m_content.size());
             }
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Realpath ---
-struct RealpathContext {
-    std::string path;
-    std::string result;
-    bool is_error = false;
-    std::string error_msg;
+struct RealpathCtx {
+    std::string m_path;
+    std::string m_result;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Realpath(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::realpath(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new RealpathContext();
-    ctx->path = *path;
+    auto p_ctx = new RealpathCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<RealpathContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<RealpathCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
             argv[1] = v8::Undefined(isolate);
         } else {
             argv[0] = v8::Null(isolate);
-            argv[1] = v8::String::NewFromUtf8(isolate, ctx->result.c_str()).ToLocalChecked();
+            argv[1] = v8::String::NewFromUtf8(isolate, p_ctx->m_result.c_str()).ToLocalChecked();
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::path p = fs::canonical(ctx->path, ec);
+        fs::path p = fs::canonical(p_ctx->m_path, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         } else {
-            ctx->result = p.string();
+            p_ctx->m_result = p.string();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::RealpathPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsString()) return;
+void FS::realpathPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    auto ctx = new RealpathContext();
-    ctx->path = *path;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new RealpathCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<RealpathContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<RealpathCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::String::NewFromUtf8(isolate, ctx->result.c_str()).ToLocalChecked()).Check();
+            p_resolver->Resolve(context, v8::String::NewFromUtf8(isolate, p_ctx->m_result.c_str()).ToLocalChecked())
+                .Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::path p = fs::canonical(ctx->path, ec);
+        fs::path p = fs::canonical(p_ctx->m_path, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         } else {
-            ctx->result = p.string();
+            p_ctx->m_result = p.string();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Chmod ---
-struct ChmodContext {
-    std::string path;
-    int mode;
-    bool is_error = false;
-    std::string error_msg;
+struct ChmodCtx {
+    std::string m_path;
+    int32_t m_mode;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Chmod(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsNumber() || !args[args.Length()-1]->IsFunction()) return;
+void FS::chmod(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsNumber() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    int mode = args[1]->Int32Value(isolate->GetCurrentContext()).FromMaybe(0);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    int32_t mode = args[1]->Int32Value(p_isolate->GetCurrentContext()).FromMaybe(0);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new ChmodContext();
-    ctx->path = *path;
-    ctx->mode = mode;
+    auto p_ctx = new ChmodCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_mode = mode;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<ChmodContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ChmodCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::permissions(ctx->path, static_cast<fs::perms>(ctx->mode), ec);
+        fs::permissions(p_ctx->m_path, static_cast<fs::perms>(p_ctx->m_mode), ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::ChmodPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsNumber()) return;
+void FS::chmodPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsNumber())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    int mode = args[1]->Int32Value(context).FromMaybe(0);
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    int32_t mode = args[1]->Int32Value(p_context).FromMaybe(0);
 
-    auto ctx = new ChmodContext();
-    ctx->path = *path;
-    ctx->mode = mode;
+    auto p_ctx = new ChmodCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_mode = mode;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<ChmodContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ChmodCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::permissions(ctx->path, static_cast<fs::perms>(ctx->mode), ec);
+        fs::permissions(p_ctx->m_path, static_cast<fs::perms>(p_ctx->m_mode), ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Readlink ---
-struct ReadlinkContext {
-    std::string path;
-    std::string result;
-    bool is_error = false;
-    std::string error_msg;
+struct ReadlinkCtx {
+    std::string m_path;
+    std::string m_result;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Readlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::readlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new ReadlinkContext();
-    ctx->path = *path;
+    auto p_ctx = new ReadlinkCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<ReadlinkContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ReadlinkCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
             argv[1] = v8::Undefined(isolate);
         } else {
             argv[0] = v8::Null(isolate);
-            argv[1] = v8::String::NewFromUtf8(isolate, ctx->result.c_str()).ToLocalChecked();
+            argv[1] = v8::String::NewFromUtf8(isolate, p_ctx->m_result.c_str()).ToLocalChecked();
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::path p = fs::read_symlink(ctx->path, ec);
+        fs::path p = fs::read_symlink(p_ctx->m_path, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         } else {
-            ctx->result = p.string();
+            p_ctx->m_result = p.string();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::ReadlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsString()) return;
+void FS::readlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    auto ctx = new ReadlinkContext();
-    ctx->path = *path;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new ReadlinkCtx();
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<ReadlinkContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ReadlinkCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::String::NewFromUtf8(isolate, ctx->result.c_str()).ToLocalChecked()).Check();
+            p_resolver->Resolve(context, v8::String::NewFromUtf8(isolate, p_ctx->m_result.c_str()).ToLocalChecked())
+                .Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::path p = fs::read_symlink(ctx->path, ec);
+        fs::path p = fs::read_symlink(p_ctx->m_path, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         } else {
-            ctx->result = p.string();
+            p_ctx->m_result = p.string();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Symlink ---
-struct SymlinkContext {
-    std::string target;
-    std::string path;
-    bool is_error = false;
-    std::string error_msg;
+struct SymlinkCtx {
+    std::string m_target;
+    std::string m_path;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Symlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::symlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value target(isolate, args[0]);
-    v8::String::Utf8Value path(isolate, args[1]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value target(p_isolate, args[0]);
+    v8::String::Utf8Value path(p_isolate, args[1]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new SymlinkContext();
-    ctx->target = *target;
-    ctx->path = *path;
+    auto p_ctx = new SymlinkCtx();
+    p_ctx->m_target = *target;
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<SymlinkContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<SymlinkCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::create_symlink(ctx->target, ctx->path, ec);
+        fs::create_symlink(p_ctx->m_target, p_ctx->m_path, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::SymlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) return;
+void FS::symlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value target(isolate, args[0]);
-    v8::String::Utf8Value path(isolate, args[1]);
+    v8::String::Utf8Value target(p_isolate, args[0]);
+    v8::String::Utf8Value path(p_isolate, args[1]);
 
-    auto ctx = new SymlinkContext();
-    ctx->target = *target;
-    ctx->path = *path;
+    auto p_ctx = new SymlinkCtx();
+    p_ctx->m_target = *target;
+    p_ctx->m_path = *path;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<SymlinkContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<SymlinkCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::create_symlink(ctx->target, ctx->path, ec);
+        fs::create_symlink(p_ctx->m_target, p_ctx->m_path, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Lstat ---
-void FS::Lstat(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::lstat(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new StatContext();
-    ctx->path = *path;
-    ctx->follow_symlink = false;
+    auto p_ctx = new StatCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_follow_symlink = false;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<StatContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<StatCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
             argv[1] = v8::Undefined(isolate);
         } else {
             argv[0] = v8::Null(isolate);
-            argv[1] = FS::CreateStats(isolate, ctx->path, ctx->ec, ctx->follow_symlink);
+            argv[1] = FS::createStats(isolate, p_ctx->m_path, p_ctx->m_ec, p_ctx->m_follow_symlink);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        if (!fs::exists(ctx->path, ec) && !fs::is_symlink(fs::symlink_status(ctx->path, ec))) {
-            ctx->is_error = true;
-            ctx->error_msg = "ENOENT: no such file or directory";
+        if (!fs::exists(p_ctx->m_path, ec) && !fs::is_symlink(fs::symlink_status(p_ctx->m_path, ec))) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "ENOENT: no such file or directory";
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::LstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsString()) return;
+void FS::lstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    auto ctx = new StatContext();
-    ctx->path = *path;
-    ctx->follow_symlink = false;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new StatCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_follow_symlink = false;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<StatContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<StatCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, FS::CreateStats(isolate, ctx->path, ctx->ec, ctx->follow_symlink)).Check();
+            p_resolver->Resolve(context, FS::createStats(isolate, p_ctx->m_path, p_ctx->m_ec, p_ctx->m_follow_symlink))
+                .Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        if (!fs::exists(ctx->path, ec) && !fs::is_symlink(fs::symlink_status(ctx->path, ec))) {
-            ctx->is_error = true;
-            ctx->error_msg = "ENOENT: no such file or directory";
+        if (!fs::exists(p_ctx->m_path, ec) && !fs::is_symlink(fs::symlink_status(p_ctx->m_path, ec))) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "ENOENT: no such file or directory";
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Utimes ---
-struct UtimesContext {
-    std::string path;
-    double atime;
-    double mtime;
-    bool is_error = false;
-    std::string error_msg;
+struct UtimesCtx {
+    std::string m_path;
+    double m_atime;
+    double m_mtime;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Utimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 4 || !args[0]->IsString() || !args[1]->IsNumber() || !args[2]->IsNumber() || !args[args.Length()-1]->IsFunction()) return;
+void FS::utimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 4 || !args[0]->IsString() || !args[1]->IsNumber() || !args[2]->IsNumber() ||
+        !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    double atime = args[1]->NumberValue(isolate->GetCurrentContext()).FromMaybe(0);
-    double mtime = args[2]->NumberValue(isolate->GetCurrentContext()).FromMaybe(0);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    double atime = args[1]->NumberValue(p_isolate->GetCurrentContext()).FromMaybe(0);
+    double mtime = args[2]->NumberValue(p_isolate->GetCurrentContext()).FromMaybe(0);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new UtimesContext();
-    ctx->path = *path;
-    ctx->atime = atime;
-    ctx->mtime = mtime;
+    auto p_ctx = new UtimesCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_atime = atime;
+    p_ctx->m_mtime = mtime;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<UtimesContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<UtimesCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::last_write_time(ctx->path, V8MillisecondsToFileTime(ctx->mtime), ec);
+        fs::last_write_time(p_ctx->m_path, V8MillisecondsToFileTime(p_ctx->m_mtime), ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::UtimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsNumber() || !args[2]->IsNumber()) return;
+void FS::utimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsNumber() || !args[2]->IsNumber())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
-    double atime = args[1]->NumberValue(context).FromMaybe(0);
-    double mtime = args[2]->NumberValue(context).FromMaybe(0);
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    double atime = args[1]->NumberValue(p_context).FromMaybe(0);
+    double mtime = args[2]->NumberValue(p_context).FromMaybe(0);
 
-    auto ctx = new UtimesContext();
-    ctx->path = *path;
-    ctx->atime = atime;
-    ctx->mtime = mtime;
+    auto p_ctx = new UtimesCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_atime = atime;
+    p_ctx->m_mtime = mtime;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<UtimesContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<UtimesCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::last_write_time(ctx->path, V8MillisecondsToFileTime(ctx->mtime), ec);
+        fs::last_write_time(p_ctx->m_path, V8MillisecondsToFileTime(p_ctx->m_mtime), ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Link ---
-struct LinkContext {
-    std::string existing_path;
-    std::string new_path;
-    bool is_error = false;
-    std::string error_msg;
+struct LinkCtx {
+    std::string m_existing_path;
+    std::string m_new_path;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Link(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[args.Length()-1]->IsFunction()) return;
+void FS::link(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
 
-    v8::String::Utf8Value existing_path(isolate, args[0]);
-    v8::String::Utf8Value new_path(isolate, args[1]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
+    v8::String::Utf8Value existing_path(p_isolate, args[0]);
+    v8::String::Utf8Value new_path(p_isolate, args[1]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
-    auto ctx = new LinkContext();
-    ctx->existing_path = *existing_path;
-    ctx->new_path = *new_path;
+    auto p_ctx = new LinkCtx();
+    p_ctx->m_existing_path = *existing_path;
+    p_ctx->m_new_path = *new_path;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<LinkContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<LinkCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::create_hard_link(ctx->existing_path, ctx->new_path, ec);
+        fs::create_hard_link(p_ctx->m_existing_path, p_ctx->m_new_path, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::LinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) return;
+void FS::linkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value existing_path(isolate, args[0]);
-    v8::String::Utf8Value new_path(isolate, args[1]);
+    v8::String::Utf8Value existing_path(p_isolate, args[0]);
+    v8::String::Utf8Value new_path(p_isolate, args[1]);
 
-    auto ctx = new LinkContext();
-    ctx->existing_path = *existing_path;
-    ctx->new_path = *new_path;
+    auto p_ctx = new LinkCtx();
+    p_ctx->m_existing_path = *existing_path;
+    p_ctx->m_new_path = *new_path;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<LinkContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<LinkCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::create_hard_link(ctx->existing_path, ctx->new_path, ec);
+        fs::create_hard_link(p_ctx->m_existing_path, p_ctx->m_new_path, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
 // --- Truncate ---
-struct TruncateContext {
-    std::string path;
-    uintmax_t length;
-    bool is_error = false;
-    std::string error_msg;
+struct TruncateCtx {
+    std::string m_path;
+    uintmax_t m_length;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Truncate(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsString()) return;
+void FS::truncate(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString())
+        return;
 
-    v8::String::Utf8Value path(isolate, args[0]);
+    v8::String::Utf8Value path(p_isolate, args[0]);
     uintmax_t length = 0;
-    v8::Local<v8::Function> cb;
+    v8::Local<v8::Function> p_cb;
 
     if (args[1]->IsFunction()) {
-        cb = args[1].As<v8::Function>();
+        p_cb = args[1].As<v8::Function>();
     } else if (args.Length() > 2 && args[1]->IsNumber() && args[2]->IsFunction()) {
-        length = static_cast<uintmax_t>(args[1]->NumberValue(isolate->GetCurrentContext()).FromMaybe(0));
-        cb = args[2].As<v8::Function>();
+        length = static_cast<uintmax_t>(args[1]->NumberValue(p_isolate->GetCurrentContext()).FromMaybe(0));
+        p_cb = args[2].As<v8::Function>();
     } else {
         return;
     }
 
-    auto ctx = new TruncateContext();
-    ctx->path = *path;
-    ctx->length = length;
+    auto p_ctx = new TruncateCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_length = length;
 
-    Task* task = new Task();
-    task->callback.Reset(isolate, cb);
-    task->is_promise = false;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<TruncateContext*>(task->data);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<TruncateCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::resize_file(ctx->path, ctx->length, ec);
+        fs::resize_file(p_ctx->m_path, p_ctx->m_length, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::TruncatePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsString()) return;
+void FS::truncatePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
 
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    v8::String::Utf8Value path(isolate, args[0]);
+    v8::String::Utf8Value path(p_isolate, args[0]);
     uintmax_t length = 0;
     if (args.Length() > 1 && args[1]->IsNumber()) {
-        length = static_cast<uintmax_t>(args[1]->NumberValue(context).FromMaybe(0));
+        length = static_cast<uintmax_t>(args[1]->NumberValue(p_context).FromMaybe(0));
     }
 
-    auto ctx = new TruncateContext();
-    ctx->path = *path;
-    ctx->length = length;
+    auto p_ctx = new TruncateCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_length = length;
 
-    Task* task = new Task();
-    task->resolver.Reset(isolate, resolver);
-    task->is_promise = true;
-    task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<TruncateContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<TruncateCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
         } else {
-            resolver->Resolve(context, v8::Undefined(isolate)).Check();
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
-        delete ctx;
+        delete p_ctx;
     };
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
-        fs::resize_file(ctx->path, ctx->length, ec);
+        fs::resize_file(p_ctx->m_path, p_ctx->m_length, ec);
         if (ec) {
-            ctx->is_error = true;
-            ctx->error_msg = ec.message();
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
         }
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::FstatSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    v8::HandleScope handle_scope(isolate);
-    auto context = isolate->GetCurrentContext();
+void FS::fstatSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
+    auto p_context = p_isolate->GetCurrentContext();
     if (args.Length() < 1 || !args[0]->IsInt32()) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "TypeError: FD must be an integer").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "TypeError: FD must be an integer").ToLocalChecked());
         return;
     }
-    int fd = args[0]->Int32Value(context).FromMaybe(-1);
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
 #ifdef _WIN32
     struct _stat64 st;
     if (_fstat64(fd, &st) != 0) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Error: Could not stat file descriptor").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "Error: Could not stat file descriptor").ToLocalChecked());
         return;
     }
 #else
     struct stat st;
     if (fstat(fd, &st) != 0) {
-        isolate->ThrowException(v8::String::NewFromUtf8(isolate, "Error: Could not stat file descriptor").ToLocalChecked());
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "Error: Could not stat file descriptor").ToLocalChecked());
         return;
     }
 #endif
-    v8::Local<v8::Object> stats = v8::Object::New(isolate);
-    stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "size"), v8::Number::New(isolate, static_cast<double>(st.st_size))).Check();
-    stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "mtimeMs"), v8::Number::New(isolate, static_cast<double>(st.st_mtime) * 1000)).Check();
+    v8::Local<v8::Object> p_stats = v8::Object::New(p_isolate);
+    p_stats
+        ->Set(p_context,
+              v8::String::NewFromUtf8Literal(p_isolate, "size"),
+              v8::Number::New(p_isolate, static_cast<double>(st.st_size)))
+        .Check();
+    p_stats
+        ->Set(p_context,
+              v8::String::NewFromUtf8Literal(p_isolate, "mtimeMs"),
+              v8::Number::New(p_isolate, static_cast<double>(st.st_mtime) * 1000))
+        .Check();
     bool is_dir = (st.st_mode & S_IFMT) == S_IFDIR;
     bool is_file = (st.st_mode & S_IFMT) == S_IFREG;
-    stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "isDirectory"), 
-        v8::FunctionTemplate::New(isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
-            args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
-        }, v8::Boolean::New(isolate, is_dir))->GetFunction(context).ToLocalChecked()).Check();
-    stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "isFile"), 
-        v8::FunctionTemplate::New(isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
-            args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
-        }, v8::Boolean::New(isolate, is_file))->GetFunction(context).ToLocalChecked()).Check();
-    args.GetReturnValue().Set(stats);
+    p_stats
+        ->Set(p_context,
+              v8::String::NewFromUtf8Literal(p_isolate, "isDirectory"),
+              v8::FunctionTemplate::New(
+                  p_isolate,
+                  [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+                      args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
+                  },
+                  v8::Boolean::New(p_isolate, is_dir))
+                  ->GetFunction(p_context)
+                  .ToLocalChecked())
+        .Check();
+    p_stats
+        ->Set(p_context,
+              v8::String::NewFromUtf8Literal(p_isolate, "isFile"),
+              v8::FunctionTemplate::New(
+                  p_isolate,
+                  [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+                      args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
+                  },
+                  v8::Boolean::New(p_isolate, is_file))
+                  ->GetFunction(p_context)
+                  .ToLocalChecked())
+        .Check();
+    args.GetReturnValue().Set(p_stats);
 }
 
-struct OpenContext {
-    std::string path; int flags; int mode; int result_fd = -1;
-    bool is_error = false; std::string error_msg;
+struct OpenCtx {
+    std::string m_path;
+    int32_t m_flags;
+    int32_t m_mode;
+    int32_t m_result_fd = -1;
+    bool m_is_error = false;
+    std::string m_error_msg;
 };
 
-void FS::Open(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length()-1]->IsFunction()) return;
-    v8::String::Utf8Value path(isolate, args[0]);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
-    int flags = 0;
+void FS::open(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+    int32_t flags = 0;
     if (args.Length() >= 2) {
-        if (args[1]->IsInt32()) flags = args[1]->Int32Value(isolate->GetCurrentContext()).FromMaybe(O_RDONLY);
+        if (args[1]->IsInt32())
+            flags = args[1]->Int32Value(p_isolate->GetCurrentContext()).FromMaybe(O_RDONLY);
         else if (args[1]->IsString()) {
-            v8::String::Utf8Value f_str(isolate, args[1]); std::string f(*f_str);
-            if (f == "r") flags = O_RDONLY; else if (f == "r+") flags = O_RDWR;
-            else if (f == "w") flags = O_WRONLY | O_CREAT | O_TRUNC;
-            else if (f == "w+") flags = O_RDWR | O_CREAT | O_TRUNC;
-            else if (f == "a") flags = O_WRONLY | O_CREAT | O_APPEND;
-            else if (f == "a+") flags = O_RDWR | O_CREAT | O_APPEND;
-            else flags = O_RDONLY;
+            v8::String::Utf8Value f_str(p_isolate, args[1]);
+            std::string f(*f_str);
+            if (f == "r")
+                flags = O_RDONLY;
+            else if (f == "r+")
+                flags = O_RDWR;
+            else if (f == "w")
+                flags = O_WRONLY | O_CREAT | O_TRUNC;
+            else if (f == "w+")
+                flags = O_RDWR | O_CREAT | O_TRUNC;
+            else if (f == "a")
+                flags = O_WRONLY | O_CREAT | O_APPEND;
+            else if (f == "a+")
+                flags = O_RDWR | O_CREAT | O_APPEND;
+            else
+                flags = O_RDONLY;
         }
     }
-    int mode = 0666;
-    if (args.Length() >= 3 && args[2]->IsInt32()) mode = args[2]->Int32Value(isolate->GetCurrentContext()).FromMaybe(0666);
-    auto ctx = new OpenContext(); ctx->path = *path; ctx->flags = flags; ctx->mode = mode;
-    Task* task = new Task(); task->callback.Reset(isolate, cb); task->is_promise = false; task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<OpenContext*>(task->data);
+    int32_t mode = 0666;
+    if (args.Length() >= 3 && args[2]->IsInt32())
+        mode = args[2]->Int32Value(p_isolate->GetCurrentContext()).FromMaybe(0666);
+    auto p_ctx = new OpenCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_flags = flags;
+    p_ctx->m_mode = mode;
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<OpenCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
-            argv[1] = v8::Undefined(isolate);
-        } else {
-            argv[0] = v8::Null(isolate); argv[1] = v8::Integer::New(isolate, ctx->result_fd);
-        }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
-        delete ctx;
-    };
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-#ifdef _WIN32
-        ctx->result_fd = _open(ctx->path.c_str(), ctx->flags | _O_BINARY, ctx->mode);
-#else
-        ctx->result_fd = open(ctx->path.c_str(), ctx->flags, ctx->mode);
-#endif
-        if (ctx->result_fd == -1) { ctx->is_error = true; ctx->error_msg = "Could not open file"; }
-        TaskQueue::GetInstance().Enqueue(task);
-    });
-}
-
-void FS::OpenPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate(); v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsString()) return;
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
-    v8::String::Utf8Value path(isolate, args[0]);
-    int flags = O_RDONLY;
-    if (args.Length() >= 2 && args[1]->IsInt32()) flags = args[1]->Int32Value(context).FromMaybe(O_RDONLY);
-    auto ctx = new OpenContext(); ctx->path = *path; ctx->flags = flags; ctx->mode = 0666;
-    Task* task = new Task(); task->resolver.Reset(isolate, resolver); task->is_promise = true; task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<OpenContext*>(task->data);
-        auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
-        else resolver->Resolve(context, v8::Integer::New(isolate, ctx->result_fd)).Check();
-        delete ctx;
-    };
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-#ifdef _WIN32
-        ctx->result_fd = _open(ctx->path.c_str(), ctx->flags | _O_BINARY, ctx->mode);
-#else
-        ctx->result_fd = open(ctx->path.c_str(), ctx->flags, ctx->mode);
-#endif
-        if (ctx->result_fd == -1) { ctx->is_error = true; ctx->error_msg = "Could not open file"; }
-        TaskQueue::GetInstance().Enqueue(task);
-    });
-}
-
-struct RWContext {
-    int fd; void* buffer_data; size_t length; int64_t position;
-    int result_count = 0; bool is_error = false; std::string error_msg;
-    v8::Global<v8::Value> buffer_keep_alive;
-};
-
-void FS::Read(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate(); v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 2 || !args[0]->IsInt32() || !args[1]->IsUint8Array() || !args[args.Length()-1]->IsFunction()) return;
-    int fd = args[0]->Int32Value(context).FromMaybe(-1);
-    v8::Local<v8::Uint8Array> ui8 = args[1].As<v8::Uint8Array>();
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
-    size_t offset = 0;
-    if (args.Length() >= 3 && args[2]->IsNumber()) offset = static_cast<size_t>(args[2]->NumberValue(context).FromMaybe(0));
-    size_t length = ui8->ByteLength() - offset;
-    if (args.Length() >= 4 && args[3]->IsNumber()) length = static_cast<size_t>(args[3]->NumberValue(context).FromMaybe(length));
-    int64_t position = -1;
-    if (args.Length() >= 5 && args[4]->IsNumber()) position = static_cast<int64_t>(args[4]->NumberValue(context).FromMaybe(-1));
-    auto ctx = new RWContext(); ctx->fd = fd;
-    ctx->buffer_data = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset() + offset;
-    ctx->length = length; ctx->position = position; ctx->buffer_keep_alive.Reset(isolate, ui8);
-    Task* task = new Task(); task->callback.Reset(isolate, cb); task->is_promise = false; task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<RWContext*>(task->data); v8::Local<v8::Value> argv[3];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
-            argv[1] = v8::Undefined(isolate); argv[2] = v8::Undefined(isolate);
-        } else {
-            argv[0] = v8::Null(isolate); argv[1] = v8::Integer::New(isolate, ctx->result_count); argv[2] = ctx->buffer_keep_alive.Get(isolate);
-        }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 3, argv);
-        ctx->buffer_keep_alive.Reset(); delete ctx;
-    };
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-        if (ctx->position != -1) ctx->result_count = pread(ctx->fd, ctx->buffer_data, ctx->length, ctx->position);
-        else {
-#ifdef _WIN32
-            ctx->result_count = _read(ctx->fd, ctx->buffer_data, (unsigned int)ctx->length);
-#else
-            ctx->result_count = read(ctx->fd, ctx->buffer_data, ctx->length);
-#endif
-        }
-        if (ctx->result_count == -1) { ctx->is_error = true; ctx->error_msg = "Read error"; }
-        TaskQueue::GetInstance().Enqueue(task);
-    });
-}
-
-void FS::Write(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate(); v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 2 || !args[0]->IsInt32() || !args[args.Length()-1]->IsFunction()) return;
-    int fd = args[0]->Int32Value(context).FromMaybe(-1);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
-    auto ctx = new RWContext(); ctx->fd = fd;
-    if (args[1]->IsString()) {
-        v8::String::Utf8Value utf8(isolate, args[1]); std::string str = *utf8;
-        ctx->length = str.length(); ctx->buffer_data = malloc(ctx->length); memcpy(ctx->buffer_data, str.c_str(), ctx->length);
-        ctx->position = -1;
-    } else if (args[1]->IsUint8Array()) {
-        v8::Local<v8::Uint8Array> ui8 = args[1].As<v8::Uint8Array>();
-        ctx->length = ui8->ByteLength(); ctx->buffer_data = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
-        ctx->buffer_keep_alive.Reset(isolate, ui8); ctx->position = -1;
-        if (args.Length() >= 3 && args[2]->IsNumber()) ctx->position = static_cast<int64_t>(args[2]->NumberValue(context).FromMaybe(-1));
-    }
-    Task* task = new Task(); task->callback.Reset(isolate, cb); task->is_promise = false; task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<RWContext*>(task->data); v8::Local<v8::Value> argv[3];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
-            argv[1] = v8::Undefined(isolate); argv[2] = v8::Undefined(isolate);
-        } else {
-            argv[0] = v8::Null(isolate); argv[1] = v8::Integer::New(isolate, ctx->result_count);
-            if (!ctx->buffer_keep_alive.IsEmpty()) argv[2] = ctx->buffer_keep_alive.Get(isolate);
-            else argv[2] = v8::Undefined(isolate);
-        }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 3, argv);
-        if (!ctx->buffer_keep_alive.IsEmpty()) ctx->buffer_keep_alive.Reset(); else free(ctx->buffer_data);
-        delete ctx;
-    };
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-        if (ctx->position != -1) ctx->result_count = pwrite(ctx->fd, ctx->buffer_data, ctx->length, ctx->position);
-        else {
-#ifdef _WIN32
-            ctx->result_count = _write(ctx->fd, ctx->buffer_data, (unsigned int)ctx->length);
-#else
-            ctx->result_count = write(ctx->fd, ctx->buffer_data, ctx->length);
-#endif
-        }
-        if (ctx->result_count == -1) { ctx->is_error = true; ctx->error_msg = "Write error"; }
-        TaskQueue::GetInstance().Enqueue(task);
-    });
-}
-
-void FS::Close(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsInt32() || !args[args.Length()-1]->IsFunction()) return;
-    int fd = args[0]->Int32Value(isolate->GetCurrentContext()).FromMaybe(-1);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
-    struct CloseCtx { int fd; bool is_error = false; };
-    auto ctx = new CloseCtx(); ctx->fd = fd;
-    Task* task = new Task(); task->callback.Reset(isolate, cb); task->is_promise = false; task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<CloseCtx*>(task->data); v8::Local<v8::Value> argv[1];
-        if (ctx->is_error) argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, "Close error").ToLocalChecked());
-        else argv[0] = v8::Null(isolate);
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
-        delete ctx;
-    };
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
-#ifdef _WIN32
-        if (_close(ctx->fd) != 0) ctx->is_error = true;
-#else
-        if (close(ctx->fd) != 0) ctx->is_error = true;
-#endif
-        TaskQueue::GetInstance().Enqueue(task);
-    });
-}
-
-void FS::Fstat(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate();
-    if (args.Length() < 2 || !args[0]->IsInt32() || !args[args.Length()-1]->IsFunction()) return;
-    int fd = args[0]->Int32Value(isolate->GetCurrentContext()).FromMaybe(-1);
-    v8::Local<v8::Function> cb = args[args.Length()-1].As<v8::Function>();
-    struct FstatCtx {
-        int fd; bool is_error = false; std::string error_msg;
-        uint64_t size; double mtime; bool is_dir; bool is_file;
-    };
-    auto ctx = new FstatCtx(); ctx->fd = fd;
-    Task* task = new Task(); task->callback.Reset(isolate, cb); task->is_promise = false; task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<FstatCtx*>(task->data); v8::Local<v8::Value> argv[2];
-        if (ctx->is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked());
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
             argv[1] = v8::Undefined(isolate);
         } else {
             argv[0] = v8::Null(isolate);
-            v8::Local<v8::Object> stats = v8::Object::New(isolate);
-            stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "size"), v8::Number::New(isolate, (double)ctx->size)).Check();
-            stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "mtimeMs"), v8::Number::New(isolate, ctx->mtime)).Check();
-            stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "isDirectory"), 
-                v8::FunctionTemplate::New(isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
-                    args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
-                }, v8::Boolean::New(isolate, ctx->is_dir))->GetFunction(context).ToLocalChecked()).Check();
-            stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "isFile"), 
-                v8::FunctionTemplate::New(isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
-                    args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
-                }, v8::Boolean::New(isolate, ctx->is_file))->GetFunction(context).ToLocalChecked()).Check();
-            argv[1] = stats;
+            argv[1] = v8::Integer::New(isolate, p_ctx->m_result_fd);
         }
-        (void)task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
-        delete ctx;
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete p_ctx;
     };
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
 #ifdef _WIN32
-        struct _stat64 st;
-        if (_fstat64(ctx->fd, &st) == 0) {
-            ctx->size = st.st_size; ctx->mtime = (double)st.st_mtime * 1000;
-            ctx->is_dir = (st.st_mode & S_IFMT) == S_IFDIR; ctx->is_file = (st.st_mode & S_IFMT) == S_IFREG;
-        } else { ctx->is_error = true; ctx->error_msg = "fstat error"; }
+        p_ctx->m_result_fd = _open(p_ctx->m_path.c_str(), p_ctx->m_flags | _O_BINARY, p_ctx->m_mode);
 #else
-        struct stat st;
-        if (fstat(ctx->fd, &st) == 0) {
-            ctx->size = st.st_size; ctx->mtime = (double)st.st_mtime * 1000;
-            ctx->is_dir = S_ISDIR(st.st_mode); ctx->is_file = S_ISREG(st.st_mode);
-        } else { ctx->is_error = true; ctx->error_msg = "fstat error"; }
+        p_ctx->m_result_fd = open(p_ctx->m_path.c_str(), p_ctx->m_flags, p_ctx->m_mode);
 #endif
-        TaskQueue::GetInstance().Enqueue(task);
+        if (p_ctx->m_result_fd == -1) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "Could not open file";
+        }
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 
-void FS::FstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    v8::Isolate* isolate = args.GetIsolate(); v8::Local<v8::Context> context = isolate->GetCurrentContext();
-    if (args.Length() < 1 || !args[0]->IsInt32()) return;
-    int fd = args[0]->Int32Value(context).FromMaybe(-1);
-    v8::Local<v8::Promise::Resolver> resolver;
-    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
-    args.GetReturnValue().Set(resolver->GetPromise());
-
-    struct FstatCtx {
-        int fd; bool is_error = false; std::string error_msg;
-        uint64_t size; double mtime; bool is_dir; bool is_file;
+void FS::openPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    int32_t flags = O_RDONLY;
+    if (args.Length() >= 2 && args[1]->IsInt32())
+        flags = args[1]->Int32Value(p_context).FromMaybe(O_RDONLY);
+    auto p_ctx = new OpenCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_flags = flags;
+    p_ctx->m_mode = 0666;
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<OpenCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error)
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        else
+            p_resolver->Resolve(context, v8::Integer::New(isolate, p_ctx->m_result_fd)).Check();
+        delete p_ctx;
     };
-    auto ctx = new FstatCtx(); ctx->fd = fd;
-
-    Task* task = new Task(); task->resolver.Reset(isolate, resolver); task->is_promise = true; task->data = ctx;
-    task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        auto ctx = static_cast<FstatCtx*>(task->data); auto resolver = task->resolver.Get(isolate);
-        if (ctx->is_error) {
-            resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, ctx->error_msg.c_str()).ToLocalChecked())).Check();
-        } else {
-            v8::Local<v8::Object> stats = v8::Object::New(isolate);
-            stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "size"), v8::Number::New(isolate, (double)ctx->size)).Check();
-            stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "mtimeMs"), v8::Number::New(isolate, ctx->mtime)).Check();
-            stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "isDirectory"), 
-                v8::FunctionTemplate::New(isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
-                    args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
-                }, v8::Boolean::New(isolate, ctx->is_dir))->GetFunction(context).ToLocalChecked()).Check();
-            stats->Set(context, v8::String::NewFromUtf8Literal(isolate, "isFile"), 
-                v8::FunctionTemplate::New(isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
-                    args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
-                }, v8::Boolean::New(isolate, ctx->is_file))->GetFunction(context).ToLocalChecked()).Check();
-            resolver->Resolve(context, stats).Check();
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        p_ctx->m_result_fd = _open(p_ctx->m_path.c_str(), p_ctx->m_flags | _O_BINARY, p_ctx->m_mode);
+#else
+        p_ctx->m_result_fd = open(p_ctx->m_path.c_str(), p_ctx->m_flags, p_ctx->m_mode);
+#endif
+        if (p_ctx->m_result_fd == -1) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "Could not open file";
         }
-        delete ctx;
-    };
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
 
-    ThreadPool::GetInstance().Enqueue([task, ctx]() {
+struct RWCtx {
+    int32_t m_fd;
+    void* m_buffer_data;
+    size_t m_length;
+    int64_t m_position;
+    int32_t m_result_count = 0;
+    bool m_is_error = false;
+    std::string m_error_msg;
+    v8::Global<v8::Value> m_buffer_keep_alive;
+};
+
+void FS::read(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[1]->IsUint8Array() || !args[args.Length() - 1]->IsFunction())
+        return;
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Uint8Array> ui8 = args[1].As<v8::Uint8Array>();
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+    size_t offset = 0;
+    if (args.Length() >= 3 && args[2]->IsNumber())
+        offset = static_cast<size_t>(args[2]->NumberValue(p_context).FromMaybe(0));
+    size_t length = ui8->ByteLength() - offset;
+    if (args.Length() >= 4 && args[3]->IsNumber())
+        length = static_cast<size_t>(args[3]->NumberValue(p_context).FromMaybe(length));
+    int64_t position = -1;
+    if (args.Length() >= 5 && args[4]->IsNumber())
+        position = static_cast<int64_t>(args[4]->NumberValue(p_context).FromMaybe(-1));
+    auto p_ctx = new RWCtx();
+    p_ctx->m_fd = fd;
+    p_ctx->m_buffer_data = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset() + offset;
+    p_ctx->m_length = length;
+    p_ctx->m_position = position;
+    p_ctx->m_buffer_keep_alive.Reset(p_isolate, ui8);
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<RWCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[3];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+            argv[1] = v8::Undefined(isolate);
+            argv[2] = v8::Undefined(isolate);
+        } else {
+            argv[0] = v8::Null(isolate);
+            argv[1] = v8::Integer::New(isolate, p_ctx->m_result_count);
+            argv[2] = p_ctx->m_buffer_keep_alive.Get(isolate);
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 3, argv);
+        p_ctx->m_buffer_keep_alive.Reset();
+        delete p_ctx;
+    };
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        if (p_ctx->m_position != -1)
+            p_ctx->m_result_count = pread(p_ctx->m_fd, p_ctx->m_buffer_data, p_ctx->m_length, p_ctx->m_position);
+        else {
+#ifdef _WIN32
+            p_ctx->m_result_count = _read(p_ctx->m_fd, p_ctx->m_buffer_data, (unsigned int) p_ctx->m_length);
+#else
+            p_ctx->m_result_count = read(p_ctx->m_fd, p_ctx->m_buffer_data, p_ctx->m_length);
+#endif
+        }
+        if (p_ctx->m_result_count == -1) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "Read error";
+        }
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::write(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[args.Length() - 1]->IsFunction())
+        return;
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+    auto p_ctx = new RWCtx();
+    p_ctx->m_fd = fd;
+    if (args[1]->IsString()) {
+        v8::String::Utf8Value utf8(p_isolate, args[1]);
+        std::string str = *utf8;
+        p_ctx->m_length = str.length();
+        p_ctx->m_buffer_data = malloc(p_ctx->m_length);
+        memcpy(p_ctx->m_buffer_data, str.c_str(), p_ctx->m_length);
+        p_ctx->m_position = -1;
+    } else if (args[1]->IsUint8Array()) {
+        v8::Local<v8::Uint8Array> ui8 = args[1].As<v8::Uint8Array>();
+        p_ctx->m_length = ui8->ByteLength();
+        p_ctx->m_buffer_data = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+        p_ctx->m_buffer_keep_alive.Reset(p_isolate, ui8);
+        p_ctx->m_position = -1;
+        if (args.Length() >= 3 && args[2]->IsNumber())
+            p_ctx->m_position = static_cast<int64_t>(args[2]->NumberValue(p_context).FromMaybe(-1));
+    }
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<RWCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[3];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+            argv[1] = v8::Undefined(isolate);
+            argv[2] = v8::Undefined(isolate);
+        } else {
+            argv[0] = v8::Null(isolate);
+            argv[1] = v8::Integer::New(isolate, p_ctx->m_result_count);
+            if (!p_ctx->m_buffer_keep_alive.IsEmpty())
+                argv[2] = p_ctx->m_buffer_keep_alive.Get(isolate);
+            else
+                argv[2] = v8::Undefined(isolate);
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 3, argv);
+        if (!p_ctx->m_buffer_keep_alive.IsEmpty())
+            p_ctx->m_buffer_keep_alive.Reset();
+        else
+            free(p_ctx->m_buffer_data);
+        delete p_ctx;
+    };
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        if (p_ctx->m_position != -1)
+            p_ctx->m_result_count = pwrite(p_ctx->m_fd, p_ctx->m_buffer_data, p_ctx->m_length, p_ctx->m_position);
+        else {
+#ifdef _WIN32
+            p_ctx->m_result_count = _write(p_ctx->m_fd, p_ctx->m_buffer_data, (unsigned int) p_ctx->m_length);
+#else
+            p_ctx->m_result_count = write(p_ctx->m_fd, p_ctx->m_buffer_data, p_ctx->m_length);
+#endif
+        }
+        if (p_ctx->m_result_count == -1) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "Write error";
+        }
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::close(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[args.Length() - 1]->IsFunction())
+        return;
+    int32_t fd = args[0]->Int32Value(p_isolate->GetCurrentContext()).FromMaybe(-1);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+    struct CloseCtx {
+        int32_t m_fd;
+        bool m_is_error = false;
+    };
+    auto p_ctx = new CloseCtx();
+    p_ctx->m_fd = fd;
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<CloseCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[1];
+        if (p_ctx->m_is_error)
+            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, "Close error").ToLocalChecked());
+        else
+            argv[0] = v8::Null(isolate);
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
+    };
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        if (_close(p_ctx->m_fd) != 0)
+            p_ctx->m_is_error = true;
+#else
+        if (close(p_ctx->m_fd) != 0)
+            p_ctx->m_is_error = true;
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+struct FstatCtx {
+    int32_t m_fd;
+    bool m_is_error = false;
+    std::string m_error_msg;
+    uint64_t m_size;
+    double m_mtime;
+    bool m_is_dir;
+    bool m_is_file;
+};
+
+void FS::fstat(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[args.Length() - 1]->IsFunction())
+        return;
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    auto p_ctx = new FstatCtx();
+    p_ctx->m_fd = fd;
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<FstatCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[2];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+            argv[1] = v8::Undefined(isolate);
+        } else {
+            argv[0] = v8::Null(isolate);
+            v8::Local<v8::Object> p_stats = v8::Object::New(isolate);
+            p_stats
+                ->Set(context,
+                      v8::String::NewFromUtf8Literal(isolate, "size"),
+                      v8::Number::New(isolate, (double) p_ctx->m_size))
+                .Check();
+            p_stats
+                ->Set(context,
+                      v8::String::NewFromUtf8Literal(isolate, "mtimeMs"),
+                      v8::Number::New(isolate, p_ctx->m_mtime))
+                .Check();
+            p_stats
+                ->Set(context,
+                      v8::String::NewFromUtf8Literal(isolate, "isDirectory"),
+                      v8::FunctionTemplate::New(
+                          isolate,
+                          [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+                              args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
+                          },
+                          v8::Boolean::New(isolate, p_ctx->m_is_dir))
+                          ->GetFunction(context)
+                          .ToLocalChecked())
+                .Check();
+            p_stats
+                ->Set(context,
+                      v8::String::NewFromUtf8Literal(isolate, "isFile"),
+                      v8::FunctionTemplate::New(
+                          isolate,
+                          [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+                              args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
+                          },
+                          v8::Boolean::New(isolate, p_ctx->m_is_file))
+                          ->GetFunction(context)
+                          .ToLocalChecked())
+                .Check();
+            argv[1] = p_stats;
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete p_ctx;
+    };
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
 #ifdef _WIN32
         struct _stat64 st;
-        if (_fstat64(ctx->fd, &st) == 0) {
-            ctx->size = st.st_size; ctx->mtime = (double)st.st_mtime * 1000;
-            ctx->is_dir = (st.st_mode & S_IFMT) == S_IFDIR; ctx->is_file = (st.st_mode & S_IFMT) == S_IFREG;
-        } else { ctx->is_error = true; ctx->error_msg = "fstat error"; }
+        if (_fstat64(p_ctx->m_fd, &st) == 0) {
+            p_ctx->m_size = st.st_size;
+            p_ctx->m_mtime = (double) st.st_mtime * 1000;
+            p_ctx->m_is_dir = (st.st_mode & S_IFMT) == S_IFDIR;
+            p_ctx->m_is_file = (st.st_mode & S_IFMT) == S_IFREG;
+        } else {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "fstat error";
+        }
 #else
         struct stat st;
-        if (fstat(ctx->fd, &st) == 0) {
-            ctx->size = st.st_size; ctx->mtime = (double)st.st_mtime * 1000;
-            ctx->is_dir = S_ISDIR(st.st_mode); ctx->is_file = S_ISREG(st.st_mode);
-        } else { ctx->is_error = true; ctx->error_msg = "fstat error"; }
+        if (fstat(p_ctx->m_fd, &st) == 0) {
+            p_ctx->m_size = st.st_size;
+            p_ctx->m_mtime = (double) st.st_mtime * 1000;
+            p_ctx->m_is_dir = S_ISDIR(st.st_mode);
+            p_ctx->m_is_file = S_ISREG(st.st_mode);
+        } else {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "fstat error";
+        }
 #endif
-        TaskQueue::GetInstance().Enqueue(task);
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::fstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsInt32())
+        return;
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    auto p_ctx = new FstatCtx();
+    p_ctx->m_fd = fd;
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<FstatCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            v8::Local<v8::Object> p_stats = v8::Object::New(isolate);
+            p_stats
+                ->Set(context,
+                      v8::String::NewFromUtf8Literal(isolate, "size"),
+                      v8::Number::New(isolate, (double) p_ctx->m_size))
+                .Check();
+            p_stats
+                ->Set(context,
+                      v8::String::NewFromUtf8Literal(isolate, "mtimeMs"),
+                      v8::Number::New(isolate, p_ctx->m_mtime))
+                .Check();
+            p_stats
+                ->Set(context,
+                      v8::String::NewFromUtf8Literal(isolate, "isDirectory"),
+                      v8::FunctionTemplate::New(
+                          isolate,
+                          [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+                              args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
+                          },
+                          v8::Boolean::New(isolate, p_ctx->m_is_dir))
+                          ->GetFunction(context)
+                          .ToLocalChecked())
+                .Check();
+            p_stats
+                ->Set(context,
+                      v8::String::NewFromUtf8Literal(isolate, "isFile"),
+                      v8::FunctionTemplate::New(
+                          isolate,
+                          [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+                              args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
+                          },
+                          v8::Boolean::New(isolate, p_ctx->m_is_file))
+                          ->GetFunction(context)
+                          .ToLocalChecked())
+                .Check();
+            p_resolver->Resolve(context, p_stats).Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        struct _stat64 st;
+        if (_fstat64(p_ctx->m_fd, &st) == 0) {
+            p_ctx->m_size = st.st_size;
+            p_ctx->m_mtime = (double) st.st_mtime * 1000;
+            p_ctx->m_is_dir = (st.st_mode & S_IFMT) == S_IFDIR;
+            p_ctx->m_is_file = (st.st_mode & S_IFMT) == S_IFREG;
+        } else {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "fstat error";
+        }
+#else
+        struct stat st;
+        if (fstat(p_ctx->m_fd, &st) == 0) {
+            p_ctx->m_size = st.st_size;
+            p_ctx->m_mtime = (double) st.st_mtime * 1000;
+            p_ctx->m_is_dir = S_ISDIR(st.st_mode);
+            p_ctx->m_is_file = S_ISREG(st.st_mode);
+        } else {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "fstat error";
+        }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
     });
 }
 

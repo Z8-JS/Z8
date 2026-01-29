@@ -2,11 +2,12 @@
 #define Z8_TASK_QUEUE_H
 
 #include "v8.h"
-#include <queue>
-#include <mutex>
-#include <functional>
-#include <condition_variable>
 #include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <functional>
+#include <mutex>
+#include <queue>
 
 namespace z8 {
 
@@ -15,51 +16,53 @@ struct Task {
     v8::Global<v8::Promise::Resolver> resolver;
     bool is_promise;
     std::function<void(v8::Isolate*, v8::Local<v8::Context>, Task*)> runner;
-    
+
     // Data (managed by the specific task)
-    void* data;
-    int error_code;
+    void* p_data;
+    int32_t error_code;
 };
 
 class TaskQueue {
-public:
-    static TaskQueue& GetInstance() {
-        static TaskQueue instance;
-        return instance;
+  public:
+    static TaskQueue& getInstance() {
+        static TaskQueue s_instance;
+        return s_instance;
     }
 
-    void Enqueue(Task* task) {
+    void enqueue(Task* p_task) {
         {
-            std::unique_lock<std::mutex> lock(mutex_);
-            queue_.push(task);
+            std::unique_lock<std::mutex> lock(m_mutex);
+            m_queue.push(p_task);
         }
-        condition_.notify_one(); // Wake up Main Thread
+        m_condition.notify_one(); // Wake up Main Thread
     }
 
-    Task* Dequeue() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        if (queue_.empty()) return nullptr;
-        Task* task = queue_.front();
-        queue_.pop();
-        return task;
+    Task* dequeue() {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        if (m_queue.empty())
+            return nullptr;
+        Task* p_task = m_queue.front();
+        m_queue.pop();
+        return p_task;
     }
 
-    bool IsEmpty() {
-        std::unique_lock<std::mutex> lock(mutex_);
-        return queue_.empty();
+    bool isEmpty() {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        return m_queue.empty();
     }
 
     // New: Blocking wait for the main thread
-    void Wait(std::chrono::milliseconds timeout) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        if (!queue_.empty()) return;
-        condition_.wait_for(lock, timeout);
+    void wait(std::chrono::milliseconds timeout) {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        if (!m_queue.empty())
+            return;
+        m_condition.wait_for(lock, timeout);
     }
 
-private:
-    std::queue<Task*> queue_;
-    std::mutex mutex_;
-    std::condition_variable condition_;
+  private:
+    std::queue<Task*> m_queue;
+    std::mutex m_mutex;
+    std::condition_variable m_condition;
 };
 
 } // namespace z8
