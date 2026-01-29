@@ -51,6 +51,13 @@ void ExampleFunction(int32_t value) {
 | `unsigned long long` | `uint64_t`                | Số nguyên 64-bit không dấu                            |
 | `short`              | `int16_t`                 | Số nguyên 16-bit                                      |
 | `unsigned char`      | `uint8_t`                 | Dữ liệu byte / nhị phân                               |
+| `NULL`               | `nullptr`                 | Con trỏ rỗng (C++11)                                  |
+
+### Quy tắc bổ sung về an toàn con trỏ và mảng:
+
+- **Luôn sử dụng `nullptr`**: Tuyệt đối không sử dụng `NULL` hoặc `0` cho con trỏ.
+- **Hạn chế tối đa `void*`**: Tránh sử dụng `void*` trừ khi bắt buộc phải giao tiếp với các thư viện C cấp thấp. Ưu tiên sử dụng `std::variant`, `templates` hoặc tính đa hình.
+- **Hạn chế `char*` và `char[]`**: Ưu tiên sử dụng `std::string` cho chuỗi văn bản và `std::vector<uint8_t>` hoặc `std::array` cho đệm dữ liệu. Điều này giúp tránh các lỗi tràn bộ đệm (buffer overflow).
 
 ### Ví dụ:
 
@@ -163,3 +170,4 @@ void process() {
 1.  **Tính nhất quán**: Mã nguồn trông sạch sẽ và dễ đọc khi tất cả các thành viên trong nhóm tuân thủ cùng một phong cách.
 2.  **Độ tin cậy**: Việc biết chính xác một biến chiếm bao nhiêu bit giúp loại bỏ hoàn toàn các lỗi "undefined behavior" khi biên dịch mã nguồn trên các hệ điều hành khác nhau (ví dụ: `long` trên Windows là 32-bit nhưng trên Linux x64 lại là 64-bit).
 3.  **Hiệu suất**: Giúp trình biên dịch tối ưu hóa tốt hơn khi biết rõ giới hạn của dữ liệu.
+4.  **An toàn (Safety)**: Giảm thiểu rủi ro lỗi bộ nhớ và lỗ hổng bảo mật bằng các kiểu dữ liệu an toàn của Modern C++.

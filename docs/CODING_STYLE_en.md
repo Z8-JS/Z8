@@ -51,6 +51,13 @@ To ensure consistency across platforms (Windows/Linux/macOS) and prevent unexpec
 | `unsigned long long` | `uint64_t`                   | 64-bit unsigned integer                         |
 | `short`              | `int16_t`                    | 16-bit signed integer                           |
 | `unsigned char`      | `uint8_t`                    | Byte / Binary data                              |
+| `NULL`               | `nullptr`                    | Null pointer (C++11)                            |
+
+### Additional Safety Rules:
+
+- **Always use `nullptr`**: Never use `NULL` or `0` for pointers.
+- **Minimize `void*`**: Avoid using `void*` unless absolutely necessary for interfacing with low-level C libraries. Prefer `std::variant`, `templates`, or polymorphism.
+- **Minimize `char*` and `char[]`**: Prefer `std::string` for text and `std::vector<uint8_t>` or `std::array` for data buffers. This helps prevent buffer overflow vulnerabilities.
 
 ---
 
@@ -142,3 +149,4 @@ void process() {
 1.  **Consistency**: The source code looks clean and is easy to read when all team members follow the same style.
 2.  **Reliability**: Knowing exactly how many bits a variable occupies eliminates "undefined behavior" when compiling across different operating systems.
 3.  **Performance**: Helps the compiler optimize better when data limits are clearly defined.
+4.  **Safety**: Minimizes memory errors and security vulnerabilities by leveraging Modern C++ safety features.
