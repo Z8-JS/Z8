@@ -361,7 +361,7 @@ class Runtime {
             v8::Local<v8::Value> resource_name = message->GetScriptResourceName();
             v8::String::Utf8Value filename(isolate, resource_name);
 
-            int linenum = message->GetLineNumber(context).FromMaybe(-1);
+            int32_t linenum = message->GetLineNumber(context).FromMaybe(-1);
             const char* filename_str = *filename ? *filename : "unknown";
             const char* exception_str = *exception ? *exception : "unknown";
 
@@ -372,11 +372,11 @@ class Runtime {
                 v8::String::Utf8Value sourceline(isolate, sourceline_maybe.ToLocalChecked());
                 std::cerr << *sourceline << std::endl;
 
-                int start = message->GetStartColumn(context).FromMaybe(0);
-                for (int i = 0; i < start; i++)
+                int32_t start = message->GetStartColumn(context).FromMaybe(0);
+                for (int32_t i = 0; i < start; i++)
                     std::cerr << " ";
-                int end = message->GetEndColumn(context).FromMaybe(0);
-                for (int i = start; i < end; i++)
+                int32_t end = message->GetEndColumn(context).FromMaybe(0);
+                for (int32_t i = start; i < end; i++)
                     std::cerr << "^";
                 std::cerr << std::endl;
             }
