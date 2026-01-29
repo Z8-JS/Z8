@@ -42,6 +42,7 @@ public:
     static void ReadSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void WriteSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void CloseSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void FstatSync(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     static void ReadFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void WriteFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -62,6 +63,8 @@ public:
     static void UtimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void LinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void TruncatePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void OpenPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void FstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Async methods (Callback-based)
     static void ReadFile(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -83,6 +86,11 @@ public:
     static void Utimes(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void Link(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void Truncate(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Open(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Read(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Write(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Close(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void Fstat(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module

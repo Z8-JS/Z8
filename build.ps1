@@ -38,7 +38,7 @@ Write-Host "Building Zane V8 (Z8)..."
 Write-Host "Configuration: $Config"
 
 # Step 0: Extract Shims
-if (Test-Path "libs/v8_monolith.lib") {
+if (Test-Path "v8/libs/v8_monolith.lib") {
     Write-Host "[0/3] Regenerating Temporal shims..."
     python tools/extract_shims.py
 }
@@ -49,13 +49,13 @@ $cppFlags = @(
     "/O2", "/Oi", "/Ot", "/MT", "/DNDEBUG",
     "/DV8_COMPRESS_POINTERS", "/DV8_ENABLE_SANDBOX",
     "/nologo", "/c",
-    "/Iinclude", "/Isrc"
+    "/Iv8/include", "/Isrc"
 )
 
 $linkFlags = @(
     "/OUT:z8.exe", "/SUBSYSTEM:CONSOLE", "/MACHINE:X64", "/NOLOGO",
     "main.obj", "temporal_shims.obj", "console.obj", "fs.obj", "timer.obj",
-    "libs/v8_monolith.lib",
+    "V8\out.gn\x64.release\obj\v8_monolith.lib",
     "libcmt.lib", "libcpmt.lib",
     "winmm.lib", "dbghelp.lib", "shlwapi.lib", "user32.lib", "iphlpapi.lib",
     "advapi32.lib", "shell32.lib", "ole32.lib", "uuid.lib", "rpcrt4.lib", "ntdll.lib"

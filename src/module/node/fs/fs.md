@@ -17,7 +17,7 @@
 | fsPromises.mkdir(path[, options])                            | ✅ Done     |
 | fsPromises.mkdtemp(prefix[, options])                        |             |
 | fsPromises.mkdtempDisposable(prefix[, options])              |             |
-| fsPromises.open(path, flags[, mode])                         |             |
+| fsPromises.open(path, flags[, mode])                         | ✅ Done     |
 | fsPromises.opendir(path[, options])                          |             |
 | fsPromises.readdir(path[, options])                          | ✅ Done     |
 | fsPromises.readFile(path[, options])                         | ✅ Done     |
@@ -39,7 +39,7 @@
 | fs.appendFile(path, data[, options], callback)               | ✅ Done     |
 | fs.chmod(path, mode, callback)                               | ✅ Done     |
 | fs.chown(path, uid, gid, callback)                           |             |
-| fs.close(fd[, callback])                                     |             |
+| fs.close(fd[, callback])                                     | ✅ Done     |
 | fs.copyFile(src, dest[, mode], callback)                     | ✅ Done     |
 | fs.cp(src, dest[, options], callback)                        |             |
 | fs.createReadStream(path[, options])                         |             |
@@ -47,7 +47,7 @@
 | fs.fchmod(fd, mode, callback)                                |             |
 | fs.fchown(fd, uid, gid, callback)                            |             |
 | fs.fdatasync(fd, callback)                                   |             |
-| fs.fstat(fd[, options], callback)                            |             |
+| fs.fstat(fd[, options], callback)                            | ✅ Done     |
 | fs.fsync(fd, callback)                                       |             |
 | fs.ftruncate(fd[, len], callback)                            |             |
 | fs.futimes(fd, atime, mtime, callback)                       |             |
@@ -58,10 +58,10 @@
 | fs.lstat(path[, options], callback)                          | ✅ Done     |
 | fs.mkdir(path[, options], callback)                          | ✅ Done     |
 | fs.mkdtemp(prefix[, options], callback)                      |             |
-| fs.open(path, flags[, mode], callback)                       |             |
+| fs.open(path, flags[, mode], callback)                       | ✅ Done     |
 | fs.openAsBlob(path[, options])                               |             |
 | fs.opendir(path[, options], callback)                        |             |
-| fs.read(fd, buffer, offset, length, position, callback)      |             |
+| fs.read(fd, buffer, offset, length, position, callback)      | ✅ Done     |
 | fs.read(fd[, options], callback)                             |             |
 | fs.read(fd, buffer[, options], callback)                     |             |
 | fs.readdir(path[, options], callback)                        | ✅ Done     |
@@ -82,23 +82,23 @@
 | fs.utimes(path, atime, mtime, callback)                      | ✅ Done     |
 | fs.watch(filename[, options][, listener])                    |             |
 | fs.watchFile(filename[, options], listener)                  |             |
-| fs.write(fd, buffer, offset[, length[, position]], callback) |             |
+| fs.write(fd, buffer, offset[, length[, position]], callback) | ✅ Done     |
 | fs.write(fd, buffer[, options], callback)                    |             |
-| fs.write(fd, string[, position[, encoding]], callback)       |             |
+| fs.write(fd, string[, position[, encoding]], callback)       | ✅ Done     |
 | fs.writeFile(file, data[, options], callback)                | ✅ Done     |
 | fs.writev(fd, buffers[, position], callback)                 |             |
 | fs.accessSync(path[, mode])                                  | ✅ Done     |
 | fs.appendFileSync(path, data[, options])                     | ✅ Done     |
 | fs.chmodSync(path, mode)                                     | ✅ Done     |
 | fs.chownSync(path, uid, gid)                                 | 🚧 Not Easy |
-| fs.closeSync(fd)                                             | 🚧 Partial  |
+| fs.closeSync(fd)                                             | ✅ Done     |
 | fs.copyFileSync(src, dest[, mode])                           | ✅ Done     |
 | fs.cpSync(src, dest[, options])                              |             |
 | fs.existsSync(path)                                          | ✅ Done     |
 | fs.fchmodSync(fd, mode)                                      |             |
 | fs.fchownSync(fd, uid, gid)                                  |             |
 | fs.fdatasyncSync(fd)                                         |             |
-| fs.fstatSync(fd[, options])                                  |             |
+| fs.fstatSync(fd[, options])                                  | ✅ Done     |
 | fs.fsyncSync(fd)                                             |             |
 | fs.ftruncateSync(fd[, len])                                  |             |
 | fs.futimesSync(fd, atime, mtime)                             |             |
@@ -111,12 +111,12 @@
 | fs.mkdtempSync(prefix[, options])                            |             |
 | fs.mkdtempDisposableSync(prefix[, options])                  |             |
 | fs.opendirSync(path[, options])                              |             |
-| fs.openSync(path[, flags[, mode]])                           | 🚧 Partial  |
+| fs.openSync(path[, flags[, mode]])                           | ✅ Done     |
 | fs.readdirSync(path[, options])                              | ✅ Done     |
 | fs.readFileSync(path[, options])                             | ✅ Done     |
 | fs.readlinkSync(path[, options])                             | ✅ Done     |
-| fs.readSync(fd, buffer, offset, length[, position])          | 🚧 Partial  |
-| fs.readSync(fd, buffer[, options])                           | 🚧 Partial  |
+| fs.readSync(fd, buffer, offset, length[, position])          | ✅ Done     |
+| fs.readSync(fd, buffer[, options])                           |             |
 | fs.readvSync(fd, buffers[, position])                        |             |
 | fs.realpathSync(path[, options])                             | ✅ Done     |
 | fs.realpathSync.native(path[, options])                      |             |
@@ -130,7 +130,7 @@
 | fs.unlinkSync(path)                                          | ✅ Done     |
 | fs.utimesSync(path, atime, mtime)                            | ✅ Done     |
 | fs.writeFileSync(file, data[, options])                      | ✅ Done     |
-| fs.writeSync(fd, buffer, offset[, length[, position]])       | 🚧 Partial  |
-| fs.writeSync(fd, buffer[, options])                          | 🚧 Partial  |
-| fs.writeSync(fd, string[, position[, encoding]])             | 🚧 Partial  |
+| fs.writeSync(fd, buffer, offset[, length[, position]])       | ✅ Done     |
+| fs.writeSync(fd, buffer[, options])                          |             |
+| fs.writeSync(fd, string[, position[, encoding]])             | ✅ Done     |
 | fs.writevSync(fd, buffers[, position])                       |             |

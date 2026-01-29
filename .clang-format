@@ -1,0 +1,44 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+
+# Thụt đầu dòng 4 khoảng trắng, không dùng Tab
+IndentWidth: 4
+UseTab: Never
+
+# Phong cách K&R: Dấu ngoặc mở dính liền (Attach)
+BreakBeforeBraces: Attach
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+
+# Cấu hình từ khóa else và catch dính liền với dấu ngoặc đóng
+ControlStatementMacros: []
+AlwaysBreakAfterReturnType: None
+
+# Độ dài tối đa của một dòng
+ColumnLimit: 120
+
+# Căn lề con trỏ (ví dụ: uint8_t* p_data)
+PointerAlignment: Left
+
+# Khoảng trắng
+SpaceAfterCStyleCast: true
+SpaceBeforeParens: ControlStatements
+SpaceInEmptyParentheses: false
+
+# Sắp xếp các include theo thứ tự ABC
+SortIncludes: true
+
+# Tiêu chuẩn C++
+Standard: Latest
+
+# Xử lý Namespace
+NamespaceIndentation: None
+FixNamespaceComments: true
+
+# Quy tắc về dấu ngoặc nhọn cho các khối lệnh
+AllowAllParametersOfDeclarationOnNextLine: true
+BinPackParameters: false
+BinPackArguments: false
+...
