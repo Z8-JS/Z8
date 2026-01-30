@@ -1,9 +1,9 @@
 ---
 name: z8-development
 description: Guidelines and instructions for developing the Z8 runtime. Includes coding standards, build processes, and testing workflows.
-license: MIT
+license: Apache-2.0
 metadata:
-  author: Agent
+  author: Zane V8 Authors
   version: "1.0.0"
 ---
 
