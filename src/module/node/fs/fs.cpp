@@ -8,9 +8,21 @@
 #include <v8-isolate.h>
 #ifdef _WIN32
 #include <io.h>
-#include <process.h>
-#include <windows.h>
 #define ssize_t long long
+#include <random>
+#include <sys/utime.h>
+
+static std::string generate_random_string(size_t len) {
+    static thread_local std::mt19937 generator(std::random_device{}());
+    static const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    std::uniform_int_distribution<int> distribution(0, sizeof(charset) - 2);
+    std::string result;
+    result.reserve(len);
+    for (size_t i = 0; i < len; ++i)
+        result += charset[distribution(generator)];
+    return result;
+}
+#include <windows.h>
 
 static int64_t pread(int32_t fd, void* p_buf, size_t count, int64_t offset) {
     HANDLE h = (HANDLE) _get_osfhandle(fd);
@@ -127,6 +139,20 @@ v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
               v8::FunctionTemplate::New(p_isolate, FS::closeSync));
     tmpl->Set(v8::String::NewFromUtf8(p_isolate, "fstatSync").ToLocalChecked(),
               v8::FunctionTemplate::New(p_isolate, FS::fstatSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "cpSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::cpSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "fchmodSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::fchmodSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "fsyncSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::fsyncSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "fdatasyncSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::fdatasyncSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "ftruncateSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::ftruncateSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "futimesSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::futimesSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "mkdtempSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::mkdtempSync));
 
     // Add fs.constants
     v8::Local<v8::ObjectTemplate> constants_tmpl = v8::ObjectTemplate::New(p_isolate);
@@ -176,6 +202,16 @@ v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, FS::write));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, FS::close));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fstat"), v8::FunctionTemplate::New(p_isolate, FS::fstat));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "rm"), v8::FunctionTemplate::New(p_isolate, FS::rm));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "cp"), v8::FunctionTemplate::New(p_isolate, FS::cp));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fchmod"), v8::FunctionTemplate::New(p_isolate, FS::fchmod));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fsync"), v8::FunctionTemplate::New(p_isolate, FS::fsync));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fdatasync"),
+              v8::FunctionTemplate::New(p_isolate, FS::fdatasync));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "ftruncate"),
+              v8::FunctionTemplate::New(p_isolate, FS::ftruncate));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "futimes"), v8::FunctionTemplate::New(p_isolate, FS::futimes));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "mkdtemp"), v8::FunctionTemplate::New(p_isolate, FS::mkdtemp));
 
     // Expose fs.promises
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "promises"), createPromisesTemplate(p_isolate));
@@ -224,6 +260,20 @@ v8::Local<v8::ObjectTemplate> FS::createPromisesTemplate(v8::Isolate* p_isolate)
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "open"), v8::FunctionTemplate::New(p_isolate, FS::openPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fstat"),
               v8::FunctionTemplate::New(p_isolate, FS::fstatPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "rm"), v8::FunctionTemplate::New(p_isolate, FS::rmPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "cp"), v8::FunctionTemplate::New(p_isolate, FS::cpPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fchmod"),
+              v8::FunctionTemplate::New(p_isolate, FS::fchmodPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fsync"),
+              v8::FunctionTemplate::New(p_isolate, FS::fsyncPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fdatasync"),
+              v8::FunctionTemplate::New(p_isolate, FS::fdatasyncPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "ftruncate"),
+              v8::FunctionTemplate::New(p_isolate, FS::ftruncatePromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "futimes"),
+              v8::FunctionTemplate::New(p_isolate, FS::futimesPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "mkdtemp"),
+              v8::FunctionTemplate::New(p_isolate, FS::mkdtempPromise));
     return tmpl;
 }
 
@@ -3546,7 +3596,871 @@ void FS::fstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             p_ctx->m_is_error = true;
             p_ctx->m_error_msg = "fstat error";
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+struct RmCtx {
+    std::string m_path;
+    bool m_recursive = false;
+    bool m_force = false;
+    bool m_is_error = false;
+    std::string m_error_msg;
+};
+
+void FS::rm(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
+
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    auto p_ctx = new RmCtx();
+    p_ctx->m_path = *path;
+
+    if (args.Length() >= 2 && args[1]->IsObject()) {
+        v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+        v8::Local<v8::Object> options = args[1].As<v8::Object>();
+        v8::Local<v8::Value> recursive_val;
+        if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "recursive")).ToLocal(&recursive_val)) {
+            p_ctx->m_recursive = recursive_val->BooleanValue(p_isolate);
         }
+    }
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<RmCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[1];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::error_code ec;
+        if (p_ctx->m_recursive) {
+            fs::remove_all(p_ctx->m_path, ec);
+        } else {
+            fs::remove(p_ctx->m_path, ec);
+        }
+        if (ec) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
+        }
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::rmPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    auto p_ctx = new RmCtx();
+    p_ctx->m_path = *path;
+
+    if (args.Length() >= 2 && args[1]->IsObject()) {
+        v8::Local<v8::Object> options = args[1].As<v8::Object>();
+        v8::Local<v8::Value> recursive_val;
+        if (options->Get(p_context, v8::String::NewFromUtf8Literal(p_isolate, "recursive")).ToLocal(&recursive_val)) {
+            p_ctx->m_recursive = recursive_val->BooleanValue(p_isolate);
+        }
+    }
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<RmCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::error_code ec;
+        if (p_ctx->m_recursive) {
+            fs::remove_all(p_ctx->m_path, ec);
+        } else {
+            fs::remove(p_ctx->m_path, ec);
+        }
+        if (ec) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
+        }
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+struct CopyCtx {
+    std::string m_src;
+    std::string m_dest;
+    bool m_is_error = false;
+    std::string m_error_msg;
+};
+
+void FS::cp(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
+
+    v8::String::Utf8Value src(p_isolate, args[0]);
+    v8::String::Utf8Value dest(p_isolate, args[1]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    auto p_ctx = new CopyCtx();
+    p_ctx->m_src = *src;
+    p_ctx->m_dest = *dest;
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<CopyCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[1];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::error_code ec;
+        fs::copy(p_ctx->m_src, p_ctx->m_dest, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
+        }
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::cpPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    v8::String::Utf8Value src(p_isolate, args[0]);
+    v8::String::Utf8Value dest(p_isolate, args[1]);
+    auto p_ctx = new CopyCtx();
+    p_ctx->m_src = *src;
+    p_ctx->m_dest = *dest;
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<CopyCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::error_code ec;
+        fs::copy(p_ctx->m_src, p_ctx->m_dest, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
+        }
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+struct FsyncCtx {
+    int32_t m_fd;
+    bool m_is_error = false;
+    std::string m_error_msg;
+};
+
+void FS::fsync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[args.Length() - 1]->IsFunction())
+        return;
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    auto p_ctx = new FsyncCtx();
+    p_ctx->m_fd = fd;
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<FsyncCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[1];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        HANDLE h = (HANDLE) _get_osfhandle(p_ctx->m_fd);
+        if (h == INVALID_HANDLE_VALUE || FlushFileBuffers(h) == 0) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "fsync failed";
+        }
+#else
+            if (fsync(p_ctx->m_fd) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "fsync failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::fsyncPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsInt32())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    auto p_ctx = new FsyncCtx();
+    p_ctx->m_fd = fd;
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<FsyncCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        HANDLE h = (HANDLE) _get_osfhandle(p_ctx->m_fd);
+        if (h == INVALID_HANDLE_VALUE || FlushFileBuffers(h) == 0) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "fsync failed";
+        }
+#else
+            if (fsync(p_ctx->m_fd) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "fsync failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::fdatasync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    fsync(args);
+}
+
+void FS::fdatasyncPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    fsyncPromise(args);
+}
+
+void FS::fchmod(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    // Basic async wrapper if needed, but fchmod is rarely used async in Node.js
+}
+
+void FS::fchmodPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+}
+
+void FS::cpSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::HandleScope handle_scope(p_isolate);
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Source and destination paths must be strings")));
+        return;
+    }
+    v8::String::Utf8Value src(p_isolate, args[0]);
+    v8::String::Utf8Value dest(p_isolate, args[1]);
+    std::error_code ec;
+    fs::copy(*src, *dest, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+        p_isolate->ThrowException(
+            v8::Exception::Error(v8::String::NewFromUtf8(p_isolate, ec.message().c_str()).ToLocalChecked()));
+    }
+}
+
+void FS::fchmodSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[1]->IsInt32()) {
+        p_isolate->ThrowException(
+            v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "fd and mode must be integers")));
+        return;
+    }
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    int32_t mode = args[1]->Int32Value(p_context).FromMaybe(0);
+#ifdef _WIN32
+    (void) fd;
+    (void) mode;
+    p_isolate->ThrowException(
+        v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "fchmod not supported on Windows")));
+#else
+        if (fchmod(fd, mode) != 0) {
+            p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "fchmod failed")));
+        }
+#endif
+}
+
+void FS::fsyncSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsInt32())
+        return;
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+#ifdef _WIN32
+    HANDLE h = (HANDLE) _get_osfhandle(fd);
+    if (h == INVALID_HANDLE_VALUE || FlushFileBuffers(h) == 0) {
+        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "fsync failed")));
+    }
+#else
+        if (fsync(fd) != 0) {
+            p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "fsync failed")));
+        }
+#endif
+}
+
+void FS::fdatasyncSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsInt32())
+        return;
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+#ifdef _WIN32
+    HANDLE h = (HANDLE) _get_osfhandle(fd);
+    if (h == INVALID_HANDLE_VALUE || FlushFileBuffers(h) == 0) {
+        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "fdatasync failed")));
+    }
+#else
+#ifdef __APPLE__
+        if (fsync(fd) != 0) {
+#else
+        if (fdatasync(fd) != 0) {
+#endif
+            p_isolate->ThrowException(
+                v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "fdatasync failed")));
+        }
+#endif
+}
+
+void FS::ftruncateSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsInt32())
+        return;
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    int64_t len = 0;
+    if (args.Length() >= 2 && args[1]->IsNumber()) {
+        len = static_cast<int64_t>(args[1]->NumberValue(p_context).FromMaybe(0));
+    }
+#ifdef _WIN32
+    if (_chsize_s(fd, len) != 0) {
+        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "ftruncate failed")));
+    }
+#else
+        if (ftruncate(fd, len) != 0) {
+            p_isolate->ThrowException(
+                v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "ftruncate failed")));
+        }
+#endif
+}
+
+void FS::futimesSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3 || !args[0]->IsInt32() || !args[1]->IsNumber() || !args[2]->IsNumber())
+        return;
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    double atime = args[1]->NumberValue(p_context).FromMaybe(0);
+    double mtime = args[2]->NumberValue(p_context).FromMaybe(0);
+
+#ifdef _WIN32
+    struct __utimbuf64 buf;
+    buf.actime = static_cast<__time64_t>(atime);
+    buf.modtime = static_cast<__time64_t>(mtime);
+    if (_futime64(fd, &buf) != 0) {
+        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "futimes failed")));
+    }
+#else
+        struct timeval tv[2];
+        tv[0].tv_sec = static_cast<time_t>(atime);
+        tv[0].tv_usec = static_cast<suseconds_t>((atime - tv[0].tv_sec) * 1000000);
+        tv[1].tv_sec = static_cast<time_t>(mtime);
+        tv[1].tv_usec = static_cast<suseconds_t>((mtime - tv[1].tv_sec) * 1000000);
+        if (futimes(fd, tv) != 0) {
+            p_isolate->ThrowException(
+                v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "futimes failed")));
+        }
+#endif
+}
+
+void FS::mkdtempSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
+    v8::String::Utf8Value prefix(p_isolate, args[0]);
+    std::string template_str = std::string(*prefix) + "XXXXXX";
+
+#ifdef _WIN32
+    // Simple implementation for Windows
+    // Simple implementation for Windows
+    for (int i = 0; i < 100; ++i) {
+        std::string path = std::string(*prefix) + generate_random_string(6);
+        std::error_code ec;
+        if (fs::create_directory(path, ec)) {
+            args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, path.c_str()).ToLocalChecked());
+            return;
+        }
+    }
+    p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "mkdtemp failed")));
+#else
+        std::vector<char> tmpl(template_str.begin(), template_str.end());
+        tmpl.push_back('\0');
+        char* res = mkdtemp(tmpl.data());
+        if (res == nullptr) {
+            p_isolate->ThrowException(
+                v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "mkdtemp failed")));
+        } else {
+            args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, res).ToLocalChecked());
+        }
+#endif
+}
+
+struct FtruncateCtx {
+    int32_t m_fd;
+    int64_t m_len;
+    bool m_is_error = false;
+    std::string m_error_msg;
+};
+
+void FS::ftruncate(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[args.Length() - 1]->IsFunction())
+        return;
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    int64_t len = 0;
+    if (args.Length() >= 2 && args[1]->IsNumber()) {
+        len = static_cast<int64_t>(args[1]->NumberValue(p_context).FromMaybe(0));
+    }
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    auto p_ctx = new FtruncateCtx();
+    p_ctx->m_fd = fd;
+    p_ctx->m_len = len;
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<FtruncateCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[1];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        if (_chsize_s(p_ctx->m_fd, p_ctx->m_len) != 0) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "ftruncate failed";
+        }
+#else
+            if (ftruncate(p_ctx->m_fd, p_ctx->m_len) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "ftruncate failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::ftruncatePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsInt32())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    int64_t len = 0;
+    if (args.Length() >= 2 && args[1]->IsNumber()) {
+        len = static_cast<int64_t>(args[1]->NumberValue(p_context).FromMaybe(0));
+    }
+
+    auto p_ctx = new FtruncateCtx();
+    p_ctx->m_fd = fd;
+    p_ctx->m_len = len;
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<FtruncateCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        if (_chsize_s(p_ctx->m_fd, p_ctx->m_len) != 0) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "ftruncate failed";
+        }
+#else
+            if (ftruncate(p_ctx->m_fd, p_ctx->m_len) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "ftruncate failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+struct FutimesCtx {
+    int32_t m_fd;
+    double m_atime;
+    double m_mtime;
+    bool m_is_error = false;
+    std::string m_error_msg;
+};
+
+void FS::futimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 4 || !args[0]->IsInt32() || !args[1]->IsNumber() || !args[2]->IsNumber() ||
+        !args[args.Length() - 1]->IsFunction())
+        return;
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    double atime = args[1]->NumberValue(p_context).FromMaybe(0);
+    double mtime = args[2]->NumberValue(p_context).FromMaybe(0);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    auto p_ctx = new FutimesCtx();
+    p_ctx->m_fd = fd;
+    p_ctx->m_atime = atime;
+    p_ctx->m_mtime = mtime;
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<FutimesCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[1];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        struct __utimbuf64 buf;
+        buf.actime = static_cast<__time64_t>(p_ctx->m_atime);
+        buf.modtime = static_cast<__time64_t>(p_ctx->m_mtime);
+        if (_futime64(p_ctx->m_fd, &buf) != 0) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "futimes failed";
+        }
+#else
+            struct timeval tv[2];
+            tv[0].tv_sec = static_cast<time_t>(p_ctx->m_atime);
+            tv[0].tv_usec = static_cast<suseconds_t>((p_ctx->m_atime - tv[0].tv_sec) * 1000000);
+            tv[1].tv_sec = static_cast<time_t>(p_ctx->m_mtime);
+            tv[1].tv_usec = static_cast<suseconds_t>((p_ctx->m_mtime - tv[1].tv_sec) * 1000000);
+            if (futimes(p_ctx->m_fd, tv) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "futimes failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::futimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3 || !args[0]->IsInt32() || !args[1]->IsNumber() || !args[2]->IsNumber())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    double atime = args[1]->NumberValue(p_context).FromMaybe(0);
+    double mtime = args[2]->NumberValue(p_context).FromMaybe(0);
+
+    auto p_ctx = new FutimesCtx();
+    p_ctx->m_fd = fd;
+    p_ctx->m_atime = atime;
+    p_ctx->m_mtime = mtime;
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<FutimesCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        struct __utimbuf64 buf;
+        buf.actime = static_cast<__time64_t>(p_ctx->m_atime);
+        buf.modtime = static_cast<__time64_t>(p_ctx->m_mtime);
+        if (_futime64(p_ctx->m_fd, &buf) != 0) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "futimes failed";
+        }
+#else
+            struct timeval tv[2];
+            tv[0].tv_sec = static_cast<time_t>(p_ctx->m_atime);
+            tv[0].tv_usec = static_cast<suseconds_t>((p_ctx->m_atime - tv[0].tv_sec) * 1000000);
+            tv[1].tv_sec = static_cast<time_t>(p_ctx->m_mtime);
+            tv[1].tv_usec = static_cast<suseconds_t>((p_ctx->m_mtime - tv[1].tv_sec) * 1000000);
+            if (futimes(p_ctx->m_fd, tv) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "futimes failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+struct MkdtempCtx {
+    std::string m_prefix;
+    std::string m_result;
+    bool m_is_error = false;
+    std::string m_error_msg;
+};
+
+void FS::mkdtemp(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
+    v8::String::Utf8Value prefix(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    auto p_ctx = new MkdtempCtx();
+    p_ctx->m_prefix = *prefix;
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<MkdtempCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[2];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+            argv[1] = v8::Undefined(isolate);
+        } else {
+            argv[0] = v8::Null(isolate);
+            argv[1] = v8::String::NewFromUtf8(isolate, p_ctx->m_result.c_str()).ToLocalChecked();
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::string template_str = p_ctx->m_prefix + "XXXXXX";
+#ifdef _WIN32
+        bool found = false;
+        for (int i = 0; i < 100; ++i) {
+            std::string path = p_ctx->m_prefix + generate_random_string(6);
+            std::error_code ec;
+            if (fs::create_directory(path, ec)) {
+                p_ctx->m_result = path;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "mkdtemp failed";
+        }
+#else
+            char* res = mkdtemp(&template_str[0]);
+            if (res == nullptr) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "mkdtemp failed";
+            } else {
+                p_ctx->m_result = res;
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::mkdtempPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    v8::String::Utf8Value prefix(p_isolate, args[0]);
+
+    auto p_ctx = new MkdtempCtx();
+    p_ctx->m_prefix = *prefix;
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<MkdtempCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            p_resolver->Resolve(context, v8::String::NewFromUtf8(isolate, p_ctx->m_result.c_str()).ToLocalChecked())
+                .Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::string template_str = p_ctx->m_prefix + "XXXXXX";
+#ifdef _WIN32
+        bool found = false;
+        for (int i = 0; i < 100; ++i) {
+            std::string path = p_ctx->m_prefix + generate_random_string(6);
+            std::error_code ec;
+            if (fs::create_directory(path, ec)) {
+                p_ctx->m_result = path;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "mkdtemp failed";
+        }
+#else
+            char* res = mkdtemp(&template_str[0]);
+            if (res == nullptr) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "mkdtemp failed";
+            } else {
+                p_ctx->m_result = res;
+            }
 #endif
         TaskQueue::getInstance().enqueue(p_task);
     });

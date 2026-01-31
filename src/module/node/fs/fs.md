@@ -8,14 +8,14 @@
 | fsPromises.chmod(path, mode)                                 | ✅ Done     |
 | fsPromises.chown(path, uid, gid)                             |             |
 | fsPromises.copyFile(src, dest[, mode])                       | ✅ Done     |
-| fsPromises.cp(src, dest[, options])                          |             |
+| fsPromises.cp(src, dest[, options])                          | ✅ Done     |
 | fsPromises.glob(pattern[, options])                          |             |
 | fsPromises.lchown(path, uid, gid)                            |             |
 | fsPromises.lutimes(path, atime, mtime)                       |             |
 | fsPromises.link(existingPath, newPath)                       | ✅ Done     |
 | fsPromises.lstat(path[, options])                            | ✅ Done     |
 | fsPromises.mkdir(path[, options])                            | ✅ Done     |
-| fsPromises.mkdtemp(prefix[, options])                        |             |
+| fsPromises.mkdtemp(prefix[, options])                        | ✅ Done     |
 | fsPromises.mkdtempDisposable(prefix[, options])              |             |
 | fsPromises.open(path, flags[, mode])                         | ✅ Done     |
 | fsPromises.opendir(path[, options])                          |             |
@@ -25,7 +25,7 @@
 | fsPromises.realpath(path[, options])                         | ✅ Done     |
 | fsPromises.rename(oldPath, newPath)                          | ✅ Done     |
 | fsPromises.rmdir(path[, options])                            | ✅ Done     |
-| fsPromises.rm(path[, options])                               |             |
+| fsPromises.rm(path[, options])                               | ✅ Done     |
 | fsPromises.stat(path[, options])                             | ✅ Done     |
 | fsPromises.statfs(path[, options])                           |             |
 | fsPromises.symlink(target, path[, type])                     | ✅ Done     |
@@ -41,23 +41,23 @@
 | fs.chown(path, uid, gid, callback)                           |             |
 | fs.close(fd[, callback])                                     | ✅ Done     |
 | fs.copyFile(src, dest[, mode], callback)                     | ✅ Done     |
-| fs.cp(src, dest[, options], callback)                        |             |
+| fs.cp(src, dest[, options], callback)                        | ✅ Done     |
 | fs.createReadStream(path[, options])                         |             |
 | fs.createWriteStream(path[, options])                        |             |
-| fs.fchmod(fd, mode, callback)                                |             |
+| fs.fchmod(fd, mode, callback)                                | ✅ Done     |
 | fs.fchown(fd, uid, gid, callback)                            |             |
-| fs.fdatasync(fd, callback)                                   |             |
+| fs.fdatasync(fd, callback)                                   | ✅ Done     |
 | fs.fstat(fd[, options], callback)                            | ✅ Done     |
-| fs.fsync(fd, callback)                                       |             |
-| fs.ftruncate(fd[, len], callback)                            |             |
-| fs.futimes(fd, atime, mtime, callback)                       |             |
+| fs.fsync(fd, callback)                                       | ✅ Done     |
+| fs.ftruncate(fd[, len], callback)                            | ✅ Done     |
+| fs.futimes(fd, atime, mtime, callback)                       | ✅ Done     |
 | fs.glob(pattern[, options], callback)                        |             |
 | fs.lchown(path, uid, gid, callback)                          |             |
 | fs.lutimes(path, atime, mtime, callback)                     |             |
 | fs.link(existingPath, newPath, callback)                     | ✅ Done     |
 | fs.lstat(path[, options], callback)                          | ✅ Done     |
 | fs.mkdir(path[, options], callback)                          | ✅ Done     |
-| fs.mkdtemp(prefix[, options], callback)                      |             |
+| fs.mkdtemp(prefix[, options], callback)                      | ✅ Done     |
 | fs.open(path, flags[, mode], callback)                       | ✅ Done     |
 | fs.openAsBlob(path[, options])                               |             |
 | fs.opendir(path[, options], callback)                        |             |
@@ -72,7 +72,7 @@
 | fs.realpath.native(path[, options], callback)                |             |
 | fs.rename(oldPath, newPath, callback)                        | ✅ Done     |
 | fs.rmdir(path[, options], callback)                          | ✅ Done     |
-| fs.rm(path[, options], callback)                             |             |
+| fs.rm(path[, options], callback)                             | ✅ Done     |
 | fs.stat(path[, options], callback)                           | ✅ Done     |
 | fs.statfs(path[, options], callback)                         |             |
 | fs.symlink(target, path[, type], callback)                   | ✅ Done     |
@@ -93,22 +93,22 @@
 | fs.chownSync(path, uid, gid)                                 | 🚧 Not Easy |
 | fs.closeSync(fd)                                             | ✅ Done     |
 | fs.copyFileSync(src, dest[, mode])                           | ✅ Done     |
-| fs.cpSync(src, dest[, options])                              |             |
+| fs.cpSync(src, dest[, options])                              | ✅ Done     |
 | fs.existsSync(path)                                          | ✅ Done     |
-| fs.fchmodSync(fd, mode)                                      |             |
+| fs.fchmodSync(fd, mode)                                      | ✅ Done     |
 | fs.fchownSync(fd, uid, gid)                                  |             |
-| fs.fdatasyncSync(fd)                                         |             |
+| fs.fdatasyncSync(fd)                                         | ✅ Done     |
 | fs.fstatSync(fd[, options])                                  | ✅ Done     |
-| fs.fsyncSync(fd)                                             |             |
-| fs.ftruncateSync(fd[, len])                                  |             |
-| fs.futimesSync(fd, atime, mtime)                             |             |
+| fs.fsyncSync(fd)                                             | ✅ Done     |
+| fs.ftruncateSync(fd[, len])                                  | ✅ Done     |
+| fs.futimesSync(fd, atime, mtime)                             | ✅ Done     |
 | fs.globSync(pattern[, options])                              |             |
 | fs.lchownSync(path, uid, gid)                                |             |
 | fs.lutimesSync(path, atime, mtime)                           |             |
 | fs.linkSync(existingPath, newPath)                           | ✅ Done     |
 | fs.lstatSync(path[, options])                                | ✅ Done     |
 | fs.mkdirSync(path[, options])                                | ✅ Done     |
-| fs.mkdtempSync(prefix[, options])                            |             |
+| fs.mkdtempSync(prefix[, options])                            | ✅ Done     |
 | fs.mkdtempDisposableSync(prefix[, options])                  |             |
 | fs.opendirSync(path[, options])                              |             |
 | fs.openSync(path[, flags[, mode]])                           | ✅ Done     |

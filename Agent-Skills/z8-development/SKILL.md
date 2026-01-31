@@ -20,7 +20,7 @@ All C++ code in the Z8 project should adhere to the following standards:
 - **Pointers**: Prefix with `p_` (e.g., `p_isolate`, `p_context`).
 - **Static Variables**: Prefix with `s_` (e.g., `s_instance`).
 - **Integer Types**: Use `int32_t` instead of `int`.
-- **Reference Docs**: Follow the guidelines in `docs/CODING_STYLE_en.md` and `docs/CODING_STYLE_vi.md`.
+- **Reference Docs**: Agent **MUST** read and follow `docs/CODING_STYLE_en.md`, `docs/OPTIMIZATION.md`, và `docs/TOOLS_GUIDE_vi.md` to understand the project deeply.
 
 ## Build Process
 
@@ -31,10 +31,13 @@ The project is built using a PowerShell script:
 
 ## Testing & Validation
 
+After implementing new features or making changes, you **MUST** re-test to ensure stability and performance.
+
 Before committing changes, ensure the following checks pass:
 
 - **Style Check**: Run `python tools/check_style.py`.
 - **Benchmark**: Run `.\z8.exe ..\TEST\benchmark_fs.js` to verify performance consistency.
+- **FS Validation**: Run `.\z8.exe ..\TEST\validate_fs.js` for deeper I/O checks.
 - **Git Hooks**: Ensure `python tools/install_hooks.py` has been run to enable pre-commit checks.
 
 ## Repository Structure

@@ -45,6 +45,13 @@ class FS {
     static void writeSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void closeSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void fstatSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void cpSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void fchmodSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void fsyncSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void fdatasyncSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void ftruncateSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void futimesSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void mkdtempSync(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     static void readFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void writeFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -67,6 +74,14 @@ class FS {
     static void truncatePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void openPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void fstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void rmPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void cpPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void fchmodPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void fsyncPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void fdatasyncPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void ftruncatePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void futimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void mkdtempPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Async methods (Callback-based)
     static void readFile(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -93,6 +108,14 @@ class FS {
     static void write(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void close(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void fstat(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void rm(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void cp(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void fchmod(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void fsync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void fdatasync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void ftruncate(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void futimes(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void mkdtemp(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module
