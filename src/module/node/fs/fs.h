@@ -52,6 +52,7 @@ class FS {
     static void ftruncateSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void futimesSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void mkdtempSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void statfsSync(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     static void readFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void writeFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -82,6 +83,7 @@ class FS {
     static void ftruncatePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void futimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void mkdtempPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void statfsPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Async methods (Callback-based)
     static void readFile(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -116,6 +118,7 @@ class FS {
     static void ftruncate(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void futimes(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void mkdtemp(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void statfs(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module

@@ -153,6 +153,8 @@ v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
               v8::FunctionTemplate::New(p_isolate, FS::futimesSync));
     tmpl->Set(v8::String::NewFromUtf8(p_isolate, "mkdtempSync").ToLocalChecked(),
               v8::FunctionTemplate::New(p_isolate, FS::mkdtempSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "statfsSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::statfsSync));
 
     // Add fs.constants
     v8::Local<v8::ObjectTemplate> constants_tmpl = v8::ObjectTemplate::New(p_isolate);
@@ -212,6 +214,7 @@ v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
               v8::FunctionTemplate::New(p_isolate, FS::ftruncate));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "futimes"), v8::FunctionTemplate::New(p_isolate, FS::futimes));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "mkdtemp"), v8::FunctionTemplate::New(p_isolate, FS::mkdtemp));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "statfs"), v8::FunctionTemplate::New(p_isolate, FS::statfs));
 
     // Expose fs.promises
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "promises"), createPromisesTemplate(p_isolate));
@@ -274,6 +277,8 @@ v8::Local<v8::ObjectTemplate> FS::createPromisesTemplate(v8::Isolate* p_isolate)
               v8::FunctionTemplate::New(p_isolate, FS::futimesPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "mkdtemp"),
               v8::FunctionTemplate::New(p_isolate, FS::mkdtempPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "statfs"),
+              v8::FunctionTemplate::New(p_isolate, FS::statfsPromise));
     return tmpl;
 }
 
@@ -4462,6 +4467,160 @@ void FS::mkdtempPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
                 p_ctx->m_result = res;
             }
 #endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+static v8::Local<v8::Object> createStatFsObject(v8::Isolate* p_isolate, const std::filesystem::space_info& info) {
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> stats = v8::Object::New(p_isolate);
+
+    // Constants from Node.js docs or typical values
+    // type: 0 (unknown)
+    // bsize: 4096 (standard default)
+    // blocks: capacity / bsize
+    // bfree: free / bsize
+    // bavail: available / bsize
+    // files: 0 (unknown in std::filesystem)
+    // ffree: 0 (unknown in std::filesystem)
+
+    // Use BigInt for potentially large values
+    uint64_t bsize = 4096;
+    uint64_t blocks = info.capacity / bsize;
+    uint64_t bfree = info.free / bsize;
+    uint64_t bavail = info.available / bsize;
+
+    stats->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "type"), v8::Integer::New(p_isolate, 0)).Check();
+    stats
+        ->Set(
+            context, v8::String::NewFromUtf8Literal(p_isolate, "bsize"), v8::BigInt::NewFromUnsigned(p_isolate, bsize))
+        .Check();
+    stats
+        ->Set(context,
+              v8::String::NewFromUtf8Literal(p_isolate, "blocks"),
+              v8::BigInt::NewFromUnsigned(p_isolate, blocks))
+        .Check();
+    stats
+        ->Set(
+            context, v8::String::NewFromUtf8Literal(p_isolate, "bfree"), v8::BigInt::NewFromUnsigned(p_isolate, bfree))
+        .Check();
+    stats
+        ->Set(context,
+              v8::String::NewFromUtf8Literal(p_isolate, "bavail"),
+              v8::BigInt::NewFromUnsigned(p_isolate, bavail))
+        .Check();
+    stats->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "files"), v8::Integer::New(p_isolate, 0)).Check();
+    stats->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "ffree"), v8::Integer::New(p_isolate, 0)).Check();
+
+    return stats;
+}
+
+void FS::statfsSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    std::error_code ec;
+    std::filesystem::space_info info = std::filesystem::space(*path, ec);
+
+    if (ec) {
+        p_isolate->ThrowException(
+            v8::Exception::Error(v8::String::NewFromUtf8(p_isolate, ec.message().c_str()).ToLocalChecked()));
+        return;
+    }
+
+    args.GetReturnValue().Set(createStatFsObject(p_isolate, info));
+}
+
+struct StatFsCtx {
+    std::string m_path;
+    std::filesystem::space_info m_info;
+    bool m_is_error = false;
+    std::string m_error_msg;
+};
+
+void FS::statfs(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    auto p_ctx = new StatFsCtx();
+    p_ctx->m_path = *path;
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<StatFsCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[2];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+            argv[1] = v8::Undefined(isolate);
+        } else {
+            argv[0] = v8::Null(isolate);
+            argv[1] = createStatFsObject(isolate, p_ctx->m_info);
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::error_code ec;
+        p_ctx->m_info = std::filesystem::space(p_ctx->m_path, ec);
+        if (ec) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
+        }
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::statfsPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    v8::String::Utf8Value path(p_isolate, args[0]);
+
+    auto p_ctx = new StatFsCtx();
+    p_ctx->m_path = *path;
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<StatFsCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            p_resolver->Resolve(context, createStatFsObject(isolate, p_ctx->m_info)).Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::error_code ec;
+        p_ctx->m_info = std::filesystem::space(p_ctx->m_path, ec);
+        if (ec) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = ec.message();
+        }
         TaskQueue::getInstance().enqueue(p_task);
     });
 }

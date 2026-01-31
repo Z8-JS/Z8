@@ -27,7 +27,7 @@
 | fsPromises.rmdir(path[, options])                            | ✅ Done     |
 | fsPromises.rm(path[, options])                               | ✅ Done     |
 | fsPromises.stat(path[, options])                             | ✅ Done     |
-| fsPromises.statfs(path[, options])                           |             |
+| fsPromises.statfs(path[, options])                           | ✅ Done     |
 | fsPromises.symlink(target, path[, type])                     | ✅ Done     |
 | fsPromises.truncate(path[, len])                             | ✅ Done     |
 | fsPromises.unlink(path)                                      | ✅ Done     |
@@ -74,7 +74,7 @@
 | fs.rmdir(path[, options], callback)                          | ✅ Done     |
 | fs.rm(path[, options], callback)                             | ✅ Done     |
 | fs.stat(path[, options], callback)                           | ✅ Done     |
-| fs.statfs(path[, options], callback)                         |             |
+| fs.statfs(path[, options], callback)                         | ✅ Done     |
 | fs.symlink(target, path[, type], callback)                   | ✅ Done     |
 | fs.truncate(path[, len], callback)                           | ✅ Done     |
 | fs.unlink(path, callback)                                    | ✅ Done     |
@@ -124,7 +124,7 @@
 | fs.rmdirSync(path[, options])                                | ✅ Done     |
 | fs.rmSync(path[, options])                                   | ✅ Done     |
 | fs.statSync(path[, options])                                 | ✅ Done     |
-| fs.statfsSync(path[, options])                               |             |
+| fs.statfsSync(path[, options])                               | ✅ Done     |
 | fs.symlinkSync(target, path[, type])                         | ✅ Done     |
 | fs.truncateSync(path[, len])                                 | ✅ Done     |
 | fs.unlinkSync(path)                                          | ✅ Done     |
