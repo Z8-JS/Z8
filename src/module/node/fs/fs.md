@@ -18,7 +18,7 @@
 | fsPromises.mkdtemp(prefix[, options])                        | ✅ Done |
 | fsPromises.mkdtempDisposable(prefix[, options])              |         |
 | fsPromises.open(path, flags[, mode])                         | ✅ Done |
-| fsPromises.opendir(path[, options])                          |         |
+| fsPromises.opendir(path[, options])                          | ✅ Done |
 | fsPromises.readdir(path[, options])                          | ✅ Done |
 | fsPromises.readFile(path[, options])                         | ✅ Done |
 | fsPromises.readlink(path[, options])                         | ✅ Done |
@@ -62,7 +62,7 @@
 | fs.mkdtemp(prefix[, options], callback)                      | ✅ Done |
 | fs.open(path, flags[, mode], callback)                       | ✅ Done |
 | fs.openAsBlob(path[, options])                               |         |
-| fs.opendir(path[, options], callback)                        |         |
+| fs.opendir(path[, options], callback)                        | ✅ Done |
 | fs.read(fd, buffer, offset, length, position, callback)      | ✅ Done |
 | fs.read(fd[, options], callback)                             |         |
 | fs.read(fd, buffer[, options], callback)                     |         |
@@ -112,7 +112,7 @@
 | fs.mkdirSync(path[, options])                                | ✅ Done |
 | fs.mkdtempSync(prefix[, options])                            | ✅ Done |
 | fs.mkdtempDisposableSync(prefix[, options])                  |         |
-| fs.opendirSync(path[, options])                              |         |
+| fs.opendirSync(path[, options])                              | ✅ Done |
 | fs.openSync(path[, flags[, mode]])                           | ✅ Done |
 | fs.readdirSync(path[, options])                              | ✅ Done |
 | fs.readFileSync(path[, options])                             | ✅ Done |
