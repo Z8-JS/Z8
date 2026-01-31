@@ -35,6 +35,8 @@ class FS {
     static void accessSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void chmodSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void chownSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void fchownSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void lchownSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void utimesSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void readlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void symlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -44,6 +46,8 @@ class FS {
     static void readSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void writeSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void closeSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readvSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void writevSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void fstatSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void cpSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void fchmodSync(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -53,6 +57,8 @@ class FS {
     static void futimesSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void mkdtempSync(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void statfsSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void lutimesSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void opendirSync(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     static void readFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void writeFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -71,6 +77,9 @@ class FS {
     static void symlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void lstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void utimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void chownPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void fchownPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void lchownPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void linkPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void truncatePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void openPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -84,6 +93,10 @@ class FS {
     static void futimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void mkdtempPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void statfsPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void lutimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void opendirPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readvPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void writevPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Async methods (Callback-based)
     static void readFile(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -99,6 +112,9 @@ class FS {
     static void appendFile(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void realpath(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void chmod(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void chown(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void fchown(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void lchown(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void readlink(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void symlink(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void lstat(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -109,6 +125,8 @@ class FS {
     static void read(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void write(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void close(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readv(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void writev(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void fstat(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void rm(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void cp(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -119,6 +137,8 @@ class FS {
     static void futimes(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void mkdtemp(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void statfs(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void lutimes(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void opendir(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module

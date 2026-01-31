@@ -119,6 +119,10 @@ v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
               v8::FunctionTemplate::New(p_isolate, FS::chmodSync));
     tmpl->Set(v8::String::NewFromUtf8(p_isolate, "chownSync").ToLocalChecked(),
               v8::FunctionTemplate::New(p_isolate, FS::chownSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "fchownSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::fchownSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "lchownSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::lchownSync));
     tmpl->Set(v8::String::NewFromUtf8(p_isolate, "utimesSync").ToLocalChecked(),
               v8::FunctionTemplate::New(p_isolate, FS::utimesSync));
     tmpl->Set(v8::String::NewFromUtf8(p_isolate, "readlinkSync").ToLocalChecked(),
@@ -137,6 +141,10 @@ v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
               v8::FunctionTemplate::New(p_isolate, FS::writeSync));
     tmpl->Set(v8::String::NewFromUtf8(p_isolate, "closeSync").ToLocalChecked(),
               v8::FunctionTemplate::New(p_isolate, FS::closeSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "readvSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::readvSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "writevSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::writevSync));
     tmpl->Set(v8::String::NewFromUtf8(p_isolate, "fstatSync").ToLocalChecked(),
               v8::FunctionTemplate::New(p_isolate, FS::fstatSync));
     tmpl->Set(v8::String::NewFromUtf8(p_isolate, "cpSync").ToLocalChecked(),
@@ -155,6 +163,10 @@ v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
               v8::FunctionTemplate::New(p_isolate, FS::mkdtempSync));
     tmpl->Set(v8::String::NewFromUtf8(p_isolate, "statfsSync").ToLocalChecked(),
               v8::FunctionTemplate::New(p_isolate, FS::statfsSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "lutimesSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::lutimesSync));
+    tmpl->Set(v8::String::NewFromUtf8(p_isolate, "opendirSync").ToLocalChecked(),
+              v8::FunctionTemplate::New(p_isolate, FS::opendirSync));
 
     // Add fs.constants
     v8::Local<v8::ObjectTemplate> constants_tmpl = v8::ObjectTemplate::New(p_isolate);
@@ -191,6 +203,9 @@ v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "realpath"),
               v8::FunctionTemplate::New(p_isolate, FS::realpath));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "chmod"), v8::FunctionTemplate::New(p_isolate, FS::chmod));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "chown"), v8::FunctionTemplate::New(p_isolate, FS::chown));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fchown"), v8::FunctionTemplate::New(p_isolate, FS::fchown));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "lchown"), v8::FunctionTemplate::New(p_isolate, FS::lchown));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "readlink"),
               v8::FunctionTemplate::New(p_isolate, FS::readlink));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "symlink"), v8::FunctionTemplate::New(p_isolate, FS::symlink));
@@ -203,6 +218,8 @@ v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "read"), v8::FunctionTemplate::New(p_isolate, FS::read));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, FS::write));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, FS::close));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "readv"), v8::FunctionTemplate::New(p_isolate, FS::readv));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "writev"), v8::FunctionTemplate::New(p_isolate, FS::writev));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fstat"), v8::FunctionTemplate::New(p_isolate, FS::fstat));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "rm"), v8::FunctionTemplate::New(p_isolate, FS::rm));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "cp"), v8::FunctionTemplate::New(p_isolate, FS::cp));
@@ -215,6 +232,8 @@ v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "futimes"), v8::FunctionTemplate::New(p_isolate, FS::futimes));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "mkdtemp"), v8::FunctionTemplate::New(p_isolate, FS::mkdtemp));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "statfs"), v8::FunctionTemplate::New(p_isolate, FS::statfs));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "lutimes"), v8::FunctionTemplate::New(p_isolate, FS::lutimes));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "opendir"), v8::FunctionTemplate::New(p_isolate, FS::opendir));
 
     // Expose fs.promises
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "promises"), createPromisesTemplate(p_isolate));
@@ -257,6 +276,12 @@ v8::Local<v8::ObjectTemplate> FS::createPromisesTemplate(v8::Isolate* p_isolate)
               v8::FunctionTemplate::New(p_isolate, FS::lstatPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "utimes"),
               v8::FunctionTemplate::New(p_isolate, FS::utimesPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "chown"),
+              v8::FunctionTemplate::New(p_isolate, FS::chownPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "fchown"),
+              v8::FunctionTemplate::New(p_isolate, FS::fchownPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "lchown"),
+              v8::FunctionTemplate::New(p_isolate, FS::lchownPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "link"), v8::FunctionTemplate::New(p_isolate, FS::linkPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "truncate"),
               v8::FunctionTemplate::New(p_isolate, FS::truncatePromise));
@@ -279,6 +304,14 @@ v8::Local<v8::ObjectTemplate> FS::createPromisesTemplate(v8::Isolate* p_isolate)
               v8::FunctionTemplate::New(p_isolate, FS::mkdtempPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "statfs"),
               v8::FunctionTemplate::New(p_isolate, FS::statfsPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "lutimes"),
+              v8::FunctionTemplate::New(p_isolate, FS::lutimesPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "opendir"),
+              v8::FunctionTemplate::New(p_isolate, FS::opendirPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "readv"),
+              v8::FunctionTemplate::New(p_isolate, FS::readvPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "writev"),
+              v8::FunctionTemplate::New(p_isolate, FS::writevPromise));
     return tmpl;
 }
 
@@ -740,12 +773,64 @@ void FS::chmodSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
 }
 
 void FS::chownSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    // std::filesystem doesn't support chown easily, would need platform specific code (POSIX)
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(
-        v8::String::NewFromUtf8(p_isolate, "Error: chown is not supported on this platform or by std::filesystem")
-            .ToLocalChecked());
+#ifdef _WIN32
+    // No-op on Windows to match libuv/Node behavior
     return;
+#else
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsInt32() || !args[2]->IsInt32()) {
+        p_isolate->ThrowException(
+            v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "Invalid arguments")));
+        return;
+    }
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    uid_t uid = static_cast<uid_t>(args[1]->Int32Value(p_context).FromMaybe(-1));
+    gid_t gid = static_cast<gid_t>(args[2]->Int32Value(p_context).FromMaybe(-1));
+    if (chown(*path, uid, gid) != 0) {
+        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "chown failed")));
+    }
+#endif
+}
+
+void FS::fchownSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+#ifdef _WIN32
+    return;
+#else
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3 || !args[0]->IsInt32() || !args[1]->IsInt32() || !args[2]->IsInt32()) {
+        p_isolate->ThrowException(
+            v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "Invalid arguments")));
+        return;
+    }
+    int fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    uid_t uid = static_cast<uid_t>(args[1]->Int32Value(p_context).FromMaybe(-1));
+    gid_t gid = static_cast<gid_t>(args[2]->Int32Value(p_context).FromMaybe(-1));
+    if (fchown(fd, uid, gid) != 0) {
+        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "fchown failed")));
+    }
+#endif
+}
+
+void FS::lchownSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+#ifdef _WIN32
+    return;
+#else
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsInt32() || !args[2]->IsInt32()) {
+        p_isolate->ThrowException(
+            v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "Invalid arguments")));
+        return;
+    }
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    uid_t uid = static_cast<uid_t>(args[1]->Int32Value(p_context).FromMaybe(-1));
+    gid_t gid = static_cast<gid_t>(args[2]->Int32Value(p_context).FromMaybe(-1));
+    if (lchown(*path, uid, gid) != 0) {
+        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "lchown failed")));
+    }
+#endif
 }
 
 void FS::utimesSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -1065,6 +1150,100 @@ void FS::closeSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
         p_isolate->ThrowException(v8::String::NewFromUtf8(p_isolate, "Error: Could not close file").ToLocalChecked());
         return;
     }
+}
+
+void FS::readvSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[1]->IsArray()) {
+        p_isolate->ThrowException(
+            v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "Invalid arguments")));
+        return;
+    }
+
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Array> buffers = args[1].As<v8::Array>();
+
+    int64_t position = -1;
+    if (args.Length() >= 3 && !args[2]->IsUndefined() && !args[2]->IsNull()) {
+        position = static_cast<int64_t>(args[2]->NumberValue(p_context).FromMaybe(-1));
+    }
+
+    size_t total_read = 0;
+    for (uint32_t i = 0; i < buffers->Length(); ++i) {
+        v8::Local<v8::Value> buf_val;
+        if (buffers->Get(p_context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
+            v8::Local<v8::Uint8Array> ui8 = buf_val.As<v8::Uint8Array>();
+            char* data = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+            size_t len = ui8->ByteLength();
+
+            int32_t read_bytes;
+#ifdef _WIN32
+            if (position != -1) {
+                _lseeki64(fd, position + total_read, SEEK_SET);
+            }
+            read_bytes = _read(fd, data, static_cast<uint32_t>(len));
+#else
+            if (position != -1) {
+                read_bytes = pread(fd, data, len, position + total_read);
+            } else {
+                read_bytes = read(fd, data, len);
+            }
+#endif
+            if (read_bytes < 0)
+                break;
+            total_read += read_bytes;
+            if (read_bytes == 0 || static_cast<size_t>(read_bytes) < len)
+                break;
+        }
+    }
+    args.GetReturnValue().Set(static_cast<int32_t>(total_read));
+}
+
+void FS::writevSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[1]->IsArray()) {
+        p_isolate->ThrowException(
+            v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "Invalid arguments")));
+        return;
+    }
+
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Array> buffers = args[1].As<v8::Array>();
+
+    int64_t position = -1;
+    if (args.Length() >= 3 && !args[2]->IsUndefined() && !args[2]->IsNull()) {
+        position = static_cast<int64_t>(args[2]->NumberValue(p_context).FromMaybe(-1));
+    }
+
+    size_t total_written = 0;
+    for (uint32_t i = 0; i < buffers->Length(); ++i) {
+        v8::Local<v8::Value> buf_val;
+        if (buffers->Get(p_context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
+            v8::Local<v8::Uint8Array> ui8 = buf_val.As<v8::Uint8Array>();
+            const char* data = static_cast<const char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+            size_t len = ui8->ByteLength();
+
+            int32_t written;
+#ifdef _WIN32
+            if (position != -1) {
+                _lseeki64(fd, position + total_written, SEEK_SET);
+            }
+            written = _write(fd, data, static_cast<uint32_t>(len));
+#else
+            if (position != -1) {
+                written = pwrite(fd, data, len, position + total_written);
+            } else {
+                written = write(fd, data, len);
+            }
+#endif
+            if (written == -1)
+                break;
+            total_written += written;
+        }
+    }
+    args.GetReturnValue().Set(static_cast<int32_t>(total_written));
 }
 
 // Async Context for ReadFile
@@ -4620,6 +4799,925 @@ void FS::statfsPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         if (ec) {
             p_ctx->m_is_error = true;
             p_ctx->m_error_msg = ec.message();
+        }
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::lutimesSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3 || !args[0]->IsString() || !args[1]->IsNumber() || !args[2]->IsNumber())
+        return;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    double atime = args[1]->NumberValue(p_context).FromMaybe(0);
+    double mtime = args[2]->NumberValue(p_context).FromMaybe(0);
+
+#ifdef _WIN32
+    // Windows implementation for lutimes (symbolic link time)
+    // We need to open the file with FILE_FLAG_OPEN_REPARSE_POINT to avoid following the link
+    HANDLE hFile = CreateFile(*path,
+                              FILE_WRITE_ATTRIBUTES,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              NULL,
+                              OPEN_EXISTING,
+                              FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                              NULL);
+
+    if (hFile == INVALID_HANDLE_VALUE) {
+        p_isolate->ThrowException(
+            v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "lutimes failed: Open failed")));
+        return;
+    }
+
+    // Convert double (seconds since epoch) to FILETIME
+    // 1 second = 10,000,000 intervals of 100ns
+    // Epoch difference (1601 to 1970) is 11644473600 seconds
+    const int64_t EPOCH_DIFF = 11644473600LL;
+    int64_t atime_int = static_cast<int64_t>(atime * 10000000) + EPOCH_DIFF * 10000000;
+    int64_t mtime_int = static_cast<int64_t>(mtime * 10000000) + EPOCH_DIFF * 10000000;
+
+    FILETIME ftAtime, ftMtime;
+    ftAtime.dwLowDateTime = (DWORD) atime_int;
+    ftAtime.dwHighDateTime = (DWORD) (atime_int >> 32);
+    ftMtime.dwLowDateTime = (DWORD) mtime_int;
+    ftMtime.dwHighDateTime = (DWORD) (mtime_int >> 32);
+
+    if (!SetFileTime(hFile, NULL, &ftAtime, &ftMtime)) {
+        CloseHandle(hFile);
+        p_isolate->ThrowException(
+            v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "lutimes failed: SetFileTime failed")));
+        return;
+    }
+    CloseHandle(hFile);
+
+#else
+        struct timeval tv[2];
+        tv[0].tv_sec = static_cast<time_t>(atime);
+        tv[0].tv_usec = static_cast<suseconds_t>((atime - tv[0].tv_sec) * 1000000);
+        tv[1].tv_sec = static_cast<time_t>(mtime);
+        tv[1].tv_usec = static_cast<suseconds_t>((mtime - tv[1].tv_sec) * 1000000);
+        if (lutimes(*path, tv) != 0) {
+            p_isolate->ThrowException(
+                v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "lutimes failed")));
+        }
+#endif
+}
+
+struct LutimesCtx {
+    std::string m_path;
+    double m_atime;
+    double m_mtime;
+    bool m_is_error = false;
+    std::string m_error_msg;
+};
+
+void FS::lutimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 4 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    double atime = args[1]->NumberValue(p_context).FromMaybe(0);
+    double mtime = args[2]->NumberValue(p_context).FromMaybe(0);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    auto p_ctx = new LutimesCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_atime = atime;
+    p_ctx->m_mtime = mtime;
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<LutimesCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[1];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        HANDLE hFile = CreateFile(p_ctx->m_path.c_str(),
+                                  FILE_WRITE_ATTRIBUTES,
+                                  FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                  NULL,
+                                  OPEN_EXISTING,
+                                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                                  NULL);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "lutimes failed: Open failed";
+        } else {
+            const int64_t EPOCH_DIFF = 11644473600LL;
+            int64_t atime_int = static_cast<int64_t>(p_ctx->m_atime * 10000000) + EPOCH_DIFF * 10000000;
+            int64_t mtime_int = static_cast<int64_t>(p_ctx->m_mtime * 10000000) + EPOCH_DIFF * 10000000;
+            FILETIME ftAtime, ftMtime;
+            ftAtime.dwLowDateTime = (DWORD) atime_int;
+            ftAtime.dwHighDateTime = (DWORD) (atime_int >> 32);
+            ftMtime.dwLowDateTime = (DWORD) mtime_int;
+            ftMtime.dwHighDateTime = (DWORD) (mtime_int >> 32);
+
+            if (!SetFileTime(hFile, NULL, &ftAtime, &ftMtime)) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "lutimes failed: SetFileTime failed";
+            }
+            CloseHandle(hFile);
+        }
+
+#else
+            struct timeval tv[2];
+            tv[0].tv_sec = static_cast<time_t>(p_ctx->m_atime);
+            tv[0].tv_usec = static_cast<suseconds_t>((p_ctx->m_atime - tv[0].tv_sec) * 1000000);
+            tv[1].tv_sec = static_cast<time_t>(p_ctx->m_mtime);
+            tv[1].tv_usec = static_cast<suseconds_t>((p_ctx->m_mtime - tv[1].tv_sec) * 1000000);
+            if (lutimes(p_ctx->m_path.c_str(), tv) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "lutimes failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::lutimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3 || !args[0]->IsString())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    double atime = args[1]->NumberValue(p_context).FromMaybe(0);
+    double mtime = args[2]->NumberValue(p_context).FromMaybe(0);
+
+    auto p_ctx = new LutimesCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_atime = atime;
+    p_ctx->m_mtime = mtime;
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<LutimesCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        HANDLE hFile = CreateFile(p_ctx->m_path.c_str(),
+                                  FILE_WRITE_ATTRIBUTES,
+                                  FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                  NULL,
+                                  OPEN_EXISTING,
+                                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                                  NULL);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "lutimes failed: Open failed";
+        } else {
+            const int64_t EPOCH_DIFF = 11644473600LL;
+            int64_t atime_int = static_cast<int64_t>(p_ctx->m_atime * 10000000) + EPOCH_DIFF * 10000000;
+            int64_t mtime_int = static_cast<int64_t>(p_ctx->m_mtime * 10000000) + EPOCH_DIFF * 10000000;
+            FILETIME ftAtime, ftMtime;
+            ftAtime.dwLowDateTime = (DWORD) atime_int;
+            ftAtime.dwHighDateTime = (DWORD) (atime_int >> 32);
+            ftMtime.dwLowDateTime = (DWORD) mtime_int;
+            ftMtime.dwHighDateTime = (DWORD) (mtime_int >> 32);
+
+            if (!SetFileTime(hFile, NULL, &ftAtime, &ftMtime)) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "lutimes failed: SetFileTime failed";
+            }
+            CloseHandle(hFile);
+        }
+
+#else
+            struct timeval tv[2];
+            tv[0].tv_sec = static_cast<time_t>(p_ctx->m_atime);
+            tv[0].tv_usec = static_cast<suseconds_t>((p_ctx->m_atime - tv[0].tv_sec) * 1000000);
+            tv[1].tv_sec = static_cast<time_t>(p_ctx->m_mtime);
+            tv[1].tv_usec = static_cast<suseconds_t>((p_ctx->m_mtime - tv[1].tv_sec) * 1000000);
+            if (lutimes(p_ctx->m_path.c_str(), tv) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "lutimes failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+struct ChownCtx {
+    std::string m_path;
+    int m_fd = -1;
+    int m_uid;
+    int m_gid;
+    bool m_is_fd = false;
+    bool m_is_lchown = false;
+    bool m_is_error = false;
+    std::string m_error_msg;
+};
+
+void FS::chown(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 4 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    int uid = args[1]->Int32Value(p_context).FromMaybe(-1);
+    int gid = args[2]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    auto p_ctx = new ChownCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_uid = uid;
+    p_ctx->m_gid = gid;
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ChownCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[1];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+    // no-op
+#else
+            if (chown(p_ctx->m_path.c_str(), p_ctx->m_uid, p_ctx->m_gid) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "chown failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::fchown(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 4 || !args[0]->IsInt32() || !args[args.Length() - 1]->IsFunction())
+        return;
+    int fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    int uid = args[1]->Int32Value(p_context).FromMaybe(-1);
+    int gid = args[2]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    auto p_ctx = new ChownCtx();
+    p_ctx->m_fd = fd;
+    p_ctx->m_uid = uid;
+    p_ctx->m_gid = gid;
+    p_ctx->m_is_fd = true;
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ChownCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[1];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+    // no-op
+#else
+            if (fchown(p_ctx->m_fd, p_ctx->m_uid, p_ctx->m_gid) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "fchown failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::lchown(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 4 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    int uid = args[1]->Int32Value(p_context).FromMaybe(-1);
+    int gid = args[2]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    auto p_ctx = new ChownCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_uid = uid;
+    p_ctx->m_gid = gid;
+    p_ctx->m_is_lchown = true;
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ChownCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[1];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+        } else {
+            argv[0] = v8::Null(isolate);
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+    // no-op
+#else
+            if (lchown(p_ctx->m_path.c_str(), p_ctx->m_uid, p_ctx->m_gid) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "lchown failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::chownPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3 || !args[0]->IsString())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    int uid = args[1]->Int32Value(p_context).FromMaybe(-1);
+    int gid = args[2]->Int32Value(p_context).FromMaybe(-1);
+
+    auto p_ctx = new ChownCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_uid = uid;
+    p_ctx->m_gid = gid;
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ChownCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+#else
+            if (chown(p_ctx->m_path.c_str(), p_ctx->m_uid, p_ctx->m_gid) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "chown failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::fchownPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3 || !args[0]->IsInt32())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    int fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    int uid = args[1]->Int32Value(p_context).FromMaybe(-1);
+    int gid = args[2]->Int32Value(p_context).FromMaybe(-1);
+
+    auto p_ctx = new ChownCtx();
+    p_ctx->m_fd = fd;
+    p_ctx->m_uid = uid;
+    p_ctx->m_gid = gid;
+    p_ctx->m_is_fd = true;
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ChownCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+#else
+            if (fchown(p_ctx->m_fd, p_ctx->m_uid, p_ctx->m_gid) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "fchown failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::lchownPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3 || !args[0]->IsString())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    int uid = args[1]->Int32Value(p_context).FromMaybe(-1);
+    int gid = args[2]->Int32Value(p_context).FromMaybe(-1);
+
+    auto p_ctx = new ChownCtx();
+    p_ctx->m_path = *path;
+    p_ctx->m_uid = uid;
+    p_ctx->m_gid = gid;
+    p_ctx->m_is_lchown = true;
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ChownCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+#else
+            if (lchown(p_ctx->m_path.c_str(), p_ctx->m_uid, p_ctx->m_gid) != 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "lchown failed";
+            }
+#endif
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::opendirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    // Stub for now
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(
+        v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "opendirSync is not yet implemented")));
+}
+
+void FS::opendir(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(
+        v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "opendir is not yet implemented")));
+}
+
+void FS::opendirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(
+        v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "opendirPromise is not yet implemented")));
+}
+
+struct ReadVCtx {
+    int m_fd;
+    int64_t m_position;
+    std::vector<size_t> m_buffer_lengths;
+    std::vector<std::vector<char>> m_results;
+    size_t m_total_read = 0;
+    bool m_is_error = false;
+    std::string m_error_msg;
+    v8::Global<v8::Array> m_js_buffers;
+};
+
+void FS::readv(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[1]->IsArray() || !args[args.Length() - 1]->IsFunction())
+        return;
+
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Array> buffers = args[1].As<v8::Array>();
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    int64_t position = -1;
+    if (args.Length() >= 3 && !args[2]->IsUndefined() && !args[2]->IsNull() && args[2]->IsNumber()) {
+        position = static_cast<int64_t>(args[2]->NumberValue(p_context).FromMaybe(-1));
+    }
+
+    auto p_ctx = new ReadVCtx();
+    p_ctx->m_fd = fd;
+    p_ctx->m_position = position;
+    p_ctx->m_js_buffers.Reset(p_isolate, buffers);
+
+    for (uint32_t i = 0; i < buffers->Length(); ++i) {
+        v8::Local<v8::Value> buf_val;
+        if (buffers->Get(p_context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
+            p_ctx->m_buffer_lengths.push_back(buf_val.As<v8::Uint8Array>()->ByteLength());
+        }
+    }
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ReadVCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[3];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+            argv[1] = v8::Integer::New(isolate, 0);
+            argv[2] = v8::Null(isolate);
+        } else {
+            argv[0] = v8::Null(isolate);
+            argv[1] = v8::Integer::New(isolate, static_cast<int32_t>(p_ctx->m_total_read));
+
+            // Copy results back to JS buffers
+            v8::Local<v8::Array> buffers = p_ctx->m_js_buffers.Get(isolate);
+            for (uint32_t i = 0; i < p_ctx->m_results.size(); ++i) {
+                v8::Local<v8::Value> buf_val;
+                if (buffers->Get(context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
+                    v8::Local<v8::Uint8Array> ui8 = buf_val.As<v8::Uint8Array>();
+                    char* dst = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+                    memcpy(dst, p_ctx->m_results[i].data(), p_ctx->m_results[i].size());
+                }
+            }
+            argv[2] = buffers;
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 3, argv);
+        p_ctx->m_js_buffers.Reset();
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        for (size_t len : p_ctx->m_buffer_lengths) {
+            std::vector<char> buf(len);
+            int32_t read_bytes;
+#ifdef _WIN32
+            if (p_ctx->m_position != -1) {
+                _lseeki64(p_ctx->m_fd, p_ctx->m_position + p_ctx->m_total_read, SEEK_SET);
+            }
+            read_bytes = _read(p_ctx->m_fd, buf.data(), static_cast<uint32_t>(len));
+#else
+                if (p_ctx->m_position != -1) {
+                    read_bytes = pread(p_ctx->m_fd, buf.data(), len, p_ctx->m_position + p_ctx->m_total_read);
+                } else {
+                    read_bytes = read(p_ctx->m_fd, buf.data(), len);
+                }
+#endif
+            if (read_bytes < 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "readv failed during operation";
+                break;
+            }
+            if (read_bytes == 0)
+                break;
+            buf.resize(read_bytes);
+            p_ctx->m_results.push_back(std::move(buf));
+            p_ctx->m_total_read += read_bytes;
+            if (static_cast<size_t>(read_bytes) < len)
+                break;
+        }
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+struct WriteVCtx {
+    int m_fd;
+    int64_t m_position;
+    std::vector<std::vector<char>> m_buffers;
+    size_t m_total_written = 0;
+    bool m_is_error = false;
+    std::string m_error_msg;
+};
+
+void FS::writev(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[1]->IsArray() || !args[args.Length() - 1]->IsFunction())
+        return;
+
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Array> buffers = args[1].As<v8::Array>();
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    int64_t position = -1;
+    if (args.Length() >= 3 && !args[2]->IsUndefined() && !args[2]->IsNull() && args[2]->IsNumber()) {
+        position = static_cast<int64_t>(args[2]->NumberValue(p_context).FromMaybe(-1));
+    }
+
+    auto p_ctx = new WriteVCtx();
+    p_ctx->m_fd = fd;
+    p_ctx->m_position = position;
+
+    for (uint32_t i = 0; i < buffers->Length(); ++i) {
+        v8::Local<v8::Value> buf_val;
+        if (buffers->Get(p_context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
+            v8::Local<v8::Uint8Array> ui8 = buf_val.As<v8::Uint8Array>();
+            const char* data = static_cast<const char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+            size_t len = ui8->ByteLength();
+            p_ctx->m_buffers.emplace_back(data, data + len);
+        }
+    }
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<WriteVCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[2];
+        if (p_ctx->m_is_error) {
+            argv[0] =
+                v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+            argv[1] = v8::Integer::New(isolate, 0);
+        } else {
+            argv[0] = v8::Null(isolate);
+            argv[1] = v8::Integer::New(isolate, static_cast<int32_t>(p_ctx->m_total_written));
+        }
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        for (const auto& buf : p_ctx->m_buffers) {
+            int32_t written;
+#ifdef _WIN32
+            if (p_ctx->m_position != -1) {
+                _lseeki64(p_ctx->m_fd, p_ctx->m_position + p_ctx->m_total_written, SEEK_SET);
+            }
+            written = _write(p_ctx->m_fd, buf.data(), static_cast<uint32_t>(buf.size()));
+#else
+                if (p_ctx->m_position != -1) {
+                    written = pwrite(p_ctx->m_fd, buf.data(), buf.size(), p_ctx->m_position + p_ctx->m_total_written);
+                } else {
+                    written = write(p_ctx->m_fd, buf.data(), buf.size());
+                }
+#endif
+            if (written == -1) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "writev failed during Operation";
+                break;
+            }
+            p_ctx->m_total_written += written;
+        }
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::readvPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[1]->IsArray())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Array> buffers = args[1].As<v8::Array>();
+
+    int64_t position = -1;
+    if (args.Length() >= 3 && !args[2]->IsUndefined() && !args[2]->IsNull() && args[2]->IsNumber()) {
+        position = static_cast<int64_t>(args[2]->NumberValue(p_context).FromMaybe(-1));
+    }
+
+    auto p_ctx = new ReadVCtx();
+    p_ctx->m_fd = fd;
+    p_ctx->m_position = position;
+    p_ctx->m_js_buffers.Reset(p_isolate, buffers);
+
+    for (uint32_t i = 0; i < buffers->Length(); ++i) {
+        v8::Local<v8::Value> buf_val;
+        if (buffers->Get(p_context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
+            p_ctx->m_buffer_lengths.push_back(buf_val.As<v8::Uint8Array>()->ByteLength());
+        }
+    }
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<ReadVCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            v8::Local<v8::Array> buffers = p_ctx->m_js_buffers.Get(isolate);
+            for (uint32_t i = 0; i < p_ctx->m_results.size(); ++i) {
+                v8::Local<v8::Value> buf_val;
+                if (buffers->Get(context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
+                    v8::Local<v8::Uint8Array> ui8 = buf_val.As<v8::Uint8Array>();
+                    char* dst = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+                    memcpy(dst, p_ctx->m_results[i].data(), p_ctx->m_results[i].size());
+                }
+            }
+
+            v8::Local<v8::Object> res = v8::Object::New(isolate);
+            res->Set(context,
+                     v8::String::NewFromUtf8Literal(isolate, "bytesRead"),
+                     v8::Integer::New(isolate, static_cast<int32_t>(p_ctx->m_total_read)))
+                .Check();
+            res->Set(context, v8::String::NewFromUtf8Literal(isolate, "buffers"), buffers).Check();
+            p_resolver->Resolve(context, res).Check();
+        }
+        p_ctx->m_js_buffers.Reset();
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        for (size_t len : p_ctx->m_buffer_lengths) {
+            std::vector<char> buf(len);
+            int32_t read_bytes;
+#ifdef _WIN32
+            if (p_ctx->m_position != -1) {
+                _lseeki64(p_ctx->m_fd, p_ctx->m_position + p_ctx->m_total_read, SEEK_SET);
+            }
+            read_bytes = _read(p_ctx->m_fd, buf.data(), static_cast<uint32_t>(len));
+#else
+                if (p_ctx->m_position != -1) {
+                    read_bytes = pread(p_ctx->m_fd, buf.data(), len, p_ctx->m_position + p_ctx->m_total_read);
+                } else {
+                    read_bytes = read(p_ctx->m_fd, buf.data(), len);
+                }
+#endif
+            if (read_bytes < 0) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "readv failed during operation";
+                break;
+            }
+            if (read_bytes == 0)
+                break;
+            buf.resize(read_bytes);
+            p_ctx->m_results.push_back(std::move(buf));
+            p_ctx->m_total_read += read_bytes;
+            if (static_cast<size_t>(read_bytes) < len)
+                break;
+        }
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+void FS::writevPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsInt32() || !args[1]->IsArray())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    v8::Local<v8::Array> buffers = args[1].As<v8::Array>();
+
+    int64_t position = -1;
+    if (args.Length() >= 3 && !args[2]->IsUndefined() && !args[2]->IsNull() && args[2]->IsNumber()) {
+        position = static_cast<int64_t>(args[2]->NumberValue(p_context).FromMaybe(-1));
+    }
+
+    auto p_ctx = new WriteVCtx();
+    p_ctx->m_fd = fd;
+    p_ctx->m_position = position;
+
+    for (uint32_t i = 0; i < buffers->Length(); ++i) {
+        v8::Local<v8::Value> buf_val;
+        if (buffers->Get(p_context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
+            v8::Local<v8::Uint8Array> ui8 = buf_val.As<v8::Uint8Array>();
+            const char* data = static_cast<const char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+            size_t len = ui8->ByteLength();
+            p_ctx->m_buffers.emplace_back(data, data + len);
+        }
+    }
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<WriteVCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        if (p_ctx->m_is_error) {
+            p_resolver
+                ->Reject(
+                    context,
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                .Check();
+        } else {
+            v8::Local<v8::Object> res = v8::Object::New(isolate);
+            res->Set(context,
+                     v8::String::NewFromUtf8Literal(isolate, "bytesWritten"),
+                     v8::Integer::New(isolate, static_cast<int32_t>(p_ctx->m_total_written)))
+                .Check();
+            p_resolver->Resolve(context, res).Check();
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        for (const auto& buf : p_ctx->m_buffers) {
+            int32_t written;
+#ifdef _WIN32
+            if (p_ctx->m_position != -1) {
+                _lseeki64(p_ctx->m_fd, p_ctx->m_position + p_ctx->m_total_written, SEEK_SET);
+            }
+            written = _write(p_ctx->m_fd, buf.data(), static_cast<uint32_t>(buf.size()));
+#else
+                if (p_ctx->m_position != -1) {
+                    written = pwrite(p_ctx->m_fd, buf.data(), buf.size(), p_ctx->m_position + p_ctx->m_total_written);
+                } else {
+                    written = write(p_ctx->m_fd, buf.data(), buf.size());
+                }
+#endif
+            if (written == -1) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "writev failed during Operation";
+                break;
+            }
+            p_ctx->m_total_written += written;
         }
         TaskQueue::getInstance().enqueue(p_task);
     });
