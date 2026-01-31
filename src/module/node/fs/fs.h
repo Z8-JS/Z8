@@ -16,6 +16,8 @@ class FS {
     static v8::Local<v8::ObjectTemplate> createPromisesTemplate(v8::Isolate* p_isolate);
     static v8::Local<v8::Object>
     createStats(v8::Isolate* p_isolate, const std::filesystem::path& path, std::error_code& ec, bool follow_symlink);
+    static v8::Local<v8::Object> createDirent(v8::Isolate* p_isolate, const std::filesystem::directory_entry& entry);
+    static v8::Local<v8::Object> createDir(v8::Isolate* p_isolate, const std::filesystem::path& path);
 
     // Sync methods
     static void readFileSync(const v8::FunctionCallbackInfo<v8::Value>& args);

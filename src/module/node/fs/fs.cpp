@@ -3,6 +3,7 @@
 #include <fcntl.h> // For O_* constants
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <sys/stat.h>
 #include <v8-isolate.h>
@@ -66,6 +67,29 @@ namespace fs = std::filesystem;
 
 namespace z8 {
 namespace module {
+
+struct DirData {
+    fs::path m_path;
+    fs::directory_iterator m_it;
+    fs::directory_iterator m_end;
+    bool m_closed = false;
+    std::mutex m_mutex;
+
+    DirData(const fs::path& p) : m_path(p) {
+        std::error_code ec;
+        m_it = fs::directory_iterator(p, ec);
+        if (ec)
+            m_closed = true;
+    }
+};
+
+struct DirReadCtx {
+    DirData* p_data;
+    bool m_is_error = false;
+    std::string m_error_msg;
+    fs::directory_entry m_entry;
+    bool m_has_entry = false;
+};
 
 // Helper to convert file_time_type to V8 Date
 // Helper to convert V8 milliseconds to file_time_type
@@ -419,6 +443,246 @@ void FS::appendFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     file.close();
 }
 
+static void DirReadSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Object> self = args.This().As<v8::Object>();
+    if (self->InternalFieldCount() < 1)
+        return;
+    auto internal = self->GetInternalField(0);
+    auto* p_data = static_cast<DirData*>(v8::Local<v8::External>::Cast(internal)->Value());
+
+    std::lock_guard<std::mutex> lock(p_data->m_mutex);
+    if (p_data->m_closed || p_data->m_it == p_data->m_end) {
+        args.GetReturnValue().Set(v8::Null(p_isolate));
+        return;
+    }
+
+    std::error_code ec;
+    auto entry = *p_data->m_it;
+    p_data->m_it.increment(ec);
+    if (ec)
+        p_data->m_closed = true;
+
+    args.GetReturnValue().Set(FS::createDirent(p_isolate, entry));
+}
+
+static void DirCloseSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This().As<v8::Object>();
+    if (self->InternalFieldCount() < 1)
+        return;
+    auto internal = self->GetInternalField(0);
+    auto* p_data = static_cast<DirData*>(v8::Local<v8::External>::Cast(internal)->Value());
+
+    std::lock_guard<std::mutex> lock(p_data->m_mutex);
+    p_data->m_closed = true;
+    p_data->m_it = fs::directory_iterator();
+}
+
+static void DirRead(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.This().As<v8::Object>();
+    if (self->InternalFieldCount() < 1)
+        return;
+    auto internal = self->GetInternalField(0);
+    auto* p_data = static_cast<DirData*>(v8::Local<v8::External>::Cast(internal)->Value());
+
+    v8::Local<v8::Function> p_cb;
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    bool is_promise = true;
+
+    if (args.Length() > 0 && args[0]->IsFunction()) {
+        p_cb = args[0].As<v8::Function>();
+        is_promise = false;
+    } else {
+        if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+            return;
+        args.GetReturnValue().Set(p_resolver->GetPromise());
+    }
+
+    auto p_ctx = new DirReadCtx();
+    p_ctx->p_data = p_data;
+
+    Task* p_task = new Task();
+    p_task->is_promise = is_promise;
+    if (is_promise) {
+        p_task->resolver.Reset(p_isolate, p_resolver);
+    } else {
+        p_task->callback.Reset(p_isolate, p_cb);
+    }
+
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<DirReadCtx*>(task->p_data);
+        if (task->is_promise) {
+            auto p_resolver = task->resolver.Get(isolate);
+            if (p_ctx->m_is_error) {
+                p_resolver
+                    ->Reject(context,
+                             v8::Exception::Error(
+                                 v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked()))
+                    .Check();
+            } else if (!p_ctx->m_has_entry) {
+                p_resolver->Resolve(context, v8::Null(isolate)).Check();
+            } else {
+                p_resolver->Resolve(context, FS::createDirent(isolate, p_ctx->m_entry)).Check();
+            }
+        } else {
+            v8::Local<v8::Value> argv[2];
+            if (p_ctx->m_is_error) {
+                argv[0] =
+                    v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+                argv[1] = v8::Null(isolate);
+            } else if (!p_ctx->m_has_entry) {
+                argv[0] = v8::Null(isolate);
+                argv[1] = v8::Null(isolate);
+            } else {
+                argv[0] = v8::Null(isolate);
+                argv[1] = FS::createDirent(isolate, p_ctx->m_entry);
+            }
+            (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        }
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        std::lock_guard<std::mutex> lock(p_ctx->p_data->m_mutex);
+        if (p_ctx->p_data->m_closed || p_ctx->p_data->m_it == p_ctx->p_data->m_end) {
+            p_ctx->m_has_entry = false;
+        } else {
+            std::error_code ec;
+            p_ctx->m_entry = *p_ctx->p_data->m_it;
+            p_ctx->p_data->m_it.increment(ec);
+            if (ec) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = ec.message();
+            } else {
+                p_ctx->m_has_entry = true;
+            }
+        }
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+static void DirClose(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.This().As<v8::Object>();
+    if (self->InternalFieldCount() < 1)
+        return;
+    auto internal = self->GetInternalField(0);
+    auto* p_data = static_cast<DirData*>(v8::Local<v8::External>::Cast(internal)->Value());
+
+    v8::Local<v8::Function> p_cb;
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    bool is_promise = true;
+
+    if (args.Length() > 0 && args[0]->IsFunction()) {
+        p_cb = args[0].As<v8::Function>();
+        is_promise = false;
+    } else {
+        if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+            return;
+        args.GetReturnValue().Set(p_resolver->GetPromise());
+    }
+
+    Task* p_task = new Task();
+    p_task->is_promise = is_promise;
+    if (is_promise)
+        p_task->resolver.Reset(p_isolate, p_resolver);
+    else
+        p_task->callback.Reset(p_isolate, p_cb);
+
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        if (task->is_promise) {
+            task->resolver.Get(isolate)->Resolve(context, v8::Undefined(isolate)).Check();
+        } else {
+            v8::Local<v8::Value> argv[1] = {v8::Null(isolate)};
+            (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        }
+    };
+
+    ThreadPool::getInstance().enqueue([p_task, p_data]() {
+        std::lock_guard<std::mutex> lock(p_data->m_mutex);
+        p_data->m_closed = true;
+        p_data->m_it = fs::directory_iterator();
+        TaskQueue::getInstance().enqueue(p_task);
+    });
+}
+
+static v8::Local<v8::ObjectTemplate> GetDirTemplate(v8::Isolate* p_isolate) {
+    static v8::Persistent<v8::ObjectTemplate> dir_tmpl;
+    if (dir_tmpl.IsEmpty()) {
+        v8::Local<v8::ObjectTemplate> local_tmpl = v8::ObjectTemplate::New(p_isolate);
+        local_tmpl->SetInternalFieldCount(1);
+
+        local_tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "readSync"),
+                        v8::FunctionTemplate::New(p_isolate, DirReadSync));
+        local_tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "closeSync"),
+                        v8::FunctionTemplate::New(p_isolate, DirCloseSync));
+        local_tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "read"),
+                        v8::FunctionTemplate::New(p_isolate, DirRead));
+        local_tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "close"),
+                        v8::FunctionTemplate::New(p_isolate, DirClose));
+
+        dir_tmpl.Reset(p_isolate, local_tmpl);
+    }
+    return dir_tmpl.Get(p_isolate);
+}
+
+v8::Local<v8::Object> FS::createDirent(v8::Isolate* p_isolate, const fs::directory_entry& entry) {
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> dirent = v8::Object::New(p_isolate);
+
+    dirent
+        ->Set(p_context,
+              v8::String::NewFromUtf8Literal(p_isolate, "name"),
+              v8::String::NewFromUtf8(p_isolate, entry.path().filename().string().c_str()).ToLocalChecked())
+        .Check();
+
+    auto add_method = [&](const char* name, bool val) {
+        dirent
+            ->Set(p_context,
+                  v8::String::NewFromUtf8(p_isolate, name).ToLocalChecked(),
+                  v8::FunctionTemplate::New(
+                      p_isolate,
+                      [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+                          args.GetReturnValue().Set(args.Data().As<v8::Boolean>());
+                      },
+                      v8::Boolean::New(p_isolate, val))
+                      ->GetFunction(p_context)
+                      .ToLocalChecked())
+            .Check();
+    };
+
+    add_method("isDirectory", entry.is_directory());
+    add_method("isFile", entry.is_regular_file());
+    add_method("isSymbolicLink", entry.is_symlink());
+    add_method("isBlockDevice", entry.is_block_file());
+    add_method("isCharacterDevice", entry.is_character_file());
+    add_method("isFIFO", entry.is_fifo());
+    add_method("isSocket", entry.is_socket());
+
+    return dirent;
+}
+
+v8::Local<v8::Object> FS::createDir(v8::Isolate* p_isolate, const fs::path& path) {
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    v8::Local<v8::ObjectTemplate> tmpl = GetDirTemplate(p_isolate);
+    v8::Local<v8::Object> dir_obj = tmpl->NewInstance(p_context).ToLocalChecked();
+
+    auto* p_data = new DirData(path);
+    dir_obj->SetInternalField(0, v8::External::New(p_isolate, p_data));
+
+    dir_obj
+        ->Set(p_context,
+              v8::String::NewFromUtf8Literal(p_isolate, "path"),
+              v8::String::NewFromUtf8(p_isolate, path.string().c_str()).ToLocalChecked())
+        .Check();
+
+    return dir_obj;
+}
+
 void FS::existsSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::HandleScope handle_scope(p_isolate);
@@ -605,6 +869,7 @@ void FS::lstatSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
 void FS::readdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::HandleScope handle_scope(p_isolate);
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
 
     if (args.Length() < 1 || !args[0]->IsString()) {
         p_isolate->ThrowException(
@@ -616,10 +881,23 @@ void FS::readdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     std::string path(*path_val);
     std::error_code ec;
 
+    bool withFileTypes = false;
+    if (args.Length() >= 2 && args[1]->IsObject()) {
+        v8::Local<v8::Object> options = args[1].As<v8::Object>();
+        v8::Local<v8::Value> wft;
+        if (options->Get(p_context, v8::String::NewFromUtf8Literal(p_isolate, "withFileTypes")).ToLocal(&wft)) {
+            withFileTypes = wft->BooleanValue(p_isolate);
+        }
+    }
+
     std::vector<v8::Local<v8::Value>> entries;
     for (const auto& entry : fs::directory_iterator(path, ec)) {
-        entries.push_back(
-            v8::String::NewFromUtf8(p_isolate, entry.path().filename().string().c_str()).ToLocalChecked());
+        if (withFileTypes) {
+            entries.push_back(FS::createDirent(p_isolate, entry));
+        } else {
+            entries.push_back(
+                v8::String::NewFromUtf8(p_isolate, entry.path().filename().string().c_str()).ToLocalChecked());
+        }
     }
 
     if (ec) {
@@ -1798,7 +2076,8 @@ void FS::mkdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
 // --- Readdir ---
 struct ReaddirCtx {
     std::string m_path;
-    std::vector<std::string> m_entries;
+    bool m_with_file_types = false;
+    std::vector<fs::directory_entry> m_entries;
     bool m_is_error = false;
     std::string m_error_msg;
 };
@@ -1813,6 +2092,15 @@ void FS::readdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     auto p_ctx = new ReaddirCtx();
     p_ctx->m_path = *path;
+
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() >= 2 && args[1]->IsObject()) {
+        v8::Local<v8::Object> options = args[1].As<v8::Object>();
+        v8::Local<v8::Value> wft;
+        if (options->Get(p_context, v8::String::NewFromUtf8Literal(p_isolate, "withFileTypes")).ToLocal(&wft)) {
+            p_ctx->m_with_file_types = wft->BooleanValue(p_isolate);
+        }
+    }
 
     Task* p_task = new Task();
     p_task->callback.Reset(p_isolate, p_cb);
@@ -1829,11 +2117,14 @@ void FS::readdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
             argv[0] = v8::Null(isolate);
             v8::Local<v8::Array> array = v8::Array::New(isolate, static_cast<int32_t>(p_ctx->m_entries.size()));
             for (size_t i = 0; i < p_ctx->m_entries.size(); ++i) {
-                array
-                    ->Set(context,
-                          static_cast<uint32_t>(i),
-                          v8::String::NewFromUtf8(isolate, p_ctx->m_entries[i].c_str()).ToLocalChecked())
-                    .Check();
+                v8::Local<v8::Value> entry_val;
+                if (p_ctx->m_with_file_types) {
+                    entry_val = FS::createDirent(isolate, p_ctx->m_entries[i]);
+                } else {
+                    entry_val = v8::String::NewFromUtf8(isolate, p_ctx->m_entries[i].path().filename().string().c_str())
+                                    .ToLocalChecked();
+                }
+                array->Set(context, static_cast<uint32_t>(i), entry_val).Check();
             }
             argv[1] = array;
         }
@@ -1844,7 +2135,7 @@ void FS::readdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
         for (const auto& entry : fs::directory_iterator(p_ctx->m_path, ec)) {
-            p_ctx->m_entries.push_back(entry.path().filename().string());
+            p_ctx->m_entries.push_back(entry);
         }
         if (ec) {
             p_ctx->m_is_error = true;
@@ -1869,6 +2160,14 @@ void FS::readdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new ReaddirCtx();
     p_ctx->m_path = *path;
 
+    if (args.Length() >= 2 && args[1]->IsObject()) {
+        v8::Local<v8::Object> options = args[1].As<v8::Object>();
+        v8::Local<v8::Value> wft;
+        if (options->Get(p_context, v8::String::NewFromUtf8Literal(p_isolate, "withFileTypes")).ToLocal(&wft)) {
+            p_ctx->m_with_file_types = wft->BooleanValue(p_isolate);
+        }
+    }
+
     Task* p_task = new Task();
     p_task->resolver.Reset(p_isolate, p_resolver);
     p_task->is_promise = true;
@@ -1885,11 +2184,14 @@ void FS::readdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             v8::Local<v8::Array> array = v8::Array::New(isolate, static_cast<int32_t>(p_ctx->m_entries.size()));
             for (size_t i = 0; i < p_ctx->m_entries.size(); ++i) {
-                array
-                    ->Set(context,
-                          static_cast<uint32_t>(i),
-                          v8::String::NewFromUtf8(isolate, p_ctx->m_entries[i].c_str()).ToLocalChecked())
-                    .Check();
+                v8::Local<v8::Value> entry_val;
+                if (p_ctx->m_with_file_types) {
+                    entry_val = FS::createDirent(isolate, p_ctx->m_entries[i]);
+                } else {
+                    entry_val = v8::String::NewFromUtf8(isolate, p_ctx->m_entries[i].path().filename().string().c_str())
+                                    .ToLocalChecked();
+                }
+                array->Set(context, static_cast<uint32_t>(i), entry_val).Check();
             }
             p_resolver->Resolve(context, array).Check();
         }
@@ -1899,7 +2201,7 @@ void FS::readdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         std::error_code ec;
         for (const auto& entry : fs::directory_iterator(p_ctx->m_path, ec)) {
-            p_ctx->m_entries.push_back(entry.path().filename().string());
+            p_ctx->m_entries.push_back(entry);
         }
         if (ec) {
             p_ctx->m_is_error = true;
@@ -5335,22 +5637,76 @@ void FS::lchownPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
 }
 
 void FS::opendirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    // Stub for now
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(
-        v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "opendirSync is not yet implemented")));
+    v8::HandleScope handle_scope(p_isolate);
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
+
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    args.GetReturnValue().Set(FS::createDir(p_isolate, *path));
 }
 
 void FS::opendir(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(
-        v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "opendir is not yet implemented")));
+    if (args.Length() < 2 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
+        return;
+
+    v8::String::Utf8Value path(p_isolate, args[0]);
+    v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+
+    struct OpendirCtx {
+        std::string m_path;
+    };
+    auto p_ctx = new OpendirCtx();
+    p_ctx->m_path = *path;
+
+    Task* p_task = new Task();
+    p_task->callback.Reset(p_isolate, p_cb);
+    p_task->is_promise = false;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<OpendirCtx*>(task->p_data);
+        v8::Local<v8::Value> argv[2];
+        argv[0] = v8::Null(isolate);
+        argv[1] = FS::createDir(isolate, p_ctx->m_path);
+        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task]() { TaskQueue::getInstance().enqueue(p_task); });
 }
 
 void FS::opendirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(
-        v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "opendirPromise is not yet implemented")));
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsString())
+        return;
+
+    v8::Local<v8::Promise::Resolver> p_resolver;
+    if (!v8::Promise::Resolver::New(p_context).ToLocal(&p_resolver))
+        return;
+    args.GetReturnValue().Set(p_resolver->GetPromise());
+
+    v8::String::Utf8Value path(p_isolate, args[0]);
+
+    struct OpendirCtx {
+        std::string m_path;
+    };
+    auto p_ctx = new OpendirCtx();
+    p_ctx->m_path = *path;
+
+    Task* p_task = new Task();
+    p_task->resolver.Reset(p_isolate, p_resolver);
+    p_task->is_promise = true;
+    p_task->p_data = p_ctx;
+    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        auto p_ctx = static_cast<OpendirCtx*>(task->p_data);
+        auto p_resolver = task->resolver.Get(isolate);
+        p_resolver->Resolve(context, FS::createDir(isolate, p_ctx->m_path)).Check();
+        delete p_ctx;
+    };
+
+    ThreadPool::getInstance().enqueue([p_task]() { TaskQueue::getInstance().enqueue(p_task); });
 }
 
 struct ReadVCtx {
