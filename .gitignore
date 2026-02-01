@@ -1,0 +1,17 @@
+# Binaries and objects
+*.exe
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# Node
+node_modules/
+.env
+
+# Z8 specific
+Z8-app/out/
+mega_bench_tmp_*
+async_test_dir
+*.log
