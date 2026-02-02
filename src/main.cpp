@@ -24,6 +24,7 @@
 
 // Interface for the node.js module
 #include "module/node/fs/fs.h"
+#include "module/node/os/os.h"
 #include "module/node/path/path.h"
 #include "task_queue.h"
 #include "thread_pool.h"
@@ -189,6 +190,39 @@ class Runtime {
                     for (uint32_t i = 0; i < prop_names->Length(); ++i) {
                         v8::Local<v8::String> name = prop_names->Get(context, i).ToLocalChecked().As<v8::String>();
                         module->SetSyntheticModuleExport(isolate, name, path_obj->Get(context, name).ToLocalChecked())
+                            .Check();
+                    }
+                    return v8::Undefined(isolate);
+                });
+            return module;
+        }
+
+        if (specifier_str == "node:os") {
+            v8::Local<v8::ObjectTemplate> os_template = z8::module::OS::createTemplate(isolate);
+            v8::Local<v8::Object> os_instance = os_template->NewInstance(context).ToLocalChecked();
+            v8::Local<v8::Array> prop_names = os_instance->GetPropertyNames(context).ToLocalChecked();
+
+            std::vector<v8::Local<v8::String>> export_names;
+            export_names.push_back(v8::String::NewFromUtf8Literal(isolate, "default"));
+            for (uint32_t i = 0; i < prop_names->Length(); ++i) {
+                export_names.push_back(prop_names->Get(context, i).ToLocalChecked().As<v8::String>());
+            }
+
+            auto module = v8::Module::CreateSyntheticModule(
+                isolate,
+                v8::String::NewFromUtf8Literal(isolate, "node:os"),
+                v8::MemorySpan<const v8::Local<v8::String>>(export_names.data(), export_names.size()),
+                [](v8::Local<v8::Context> context, v8::Local<v8::Module> module) -> v8::MaybeLocal<v8::Value> {
+                    v8::Isolate* isolate = v8::Isolate::GetCurrent();
+                    v8::Local<v8::ObjectTemplate> os_template = z8::module::OS::createTemplate(isolate);
+                    v8::Local<v8::Object> os_obj = os_template->NewInstance(context).ToLocalChecked();
+                    module
+                        ->SetSyntheticModuleExport(isolate, v8::String::NewFromUtf8Literal(isolate, "default"), os_obj)
+                        .Check();
+                    v8::Local<v8::Array> prop_names = os_obj->GetPropertyNames(context).ToLocalChecked();
+                    for (uint32_t i = 0; i < prop_names->Length(); ++i) {
+                        v8::Local<v8::String> name = prop_names->Get(context, i).ToLocalChecked().As<v8::String>();
+                        module->SetSyntheticModuleExport(isolate, name, os_obj->Get(context, name).ToLocalChecked())
                             .Check();
                     }
                     return v8::Undefined(isolate);
