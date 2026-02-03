@@ -1,8 +1,10 @@
 #include "util.h"
+#include <cstdint>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
+
 
 namespace z8 {
 namespace module {
@@ -59,7 +61,7 @@ void Util::format(const v8::FunctionCallbackInfo<v8::Value>& args) {
     for (size_t i = 0; i < fmt_str.length(); ++i) {
         if (fmt_str[i] == '%' && i + 1 < fmt_str.length() && arg_index < (size_t) args.Length()) {
             char spec = fmt_str[i + 1];
-            v8::Local<v8::Value> arg = args[(int) arg_index++];
+            v8::Local<v8::Value> arg = args[(int32_t) arg_index++];
 
             if (spec == 's') {
                 v8::String::Utf8Value val(p_isolate, arg);
@@ -87,7 +89,7 @@ void Util::format(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     // Append remaining arguments
     for (; arg_index < (size_t) args.Length(); ++arg_index) {
-        v8::String::Utf8Value val(p_isolate, args[(int) arg_index]);
+        v8::String::Utf8Value val(p_isolate, args[(int32_t) arg_index]);
         result << " " << *val;
     }
 
@@ -146,16 +148,16 @@ void Util::promisify(const v8::FunctionCallbackInfo<v8::Value>& args) {
             v8::Function::New(context, callback_wrapper, v8::External::New(p_isolate, data)).ToLocalChecked();
 
         // Call original with (args..., callback)
-        int argc = args.Length();
+        int32_t argc = args.Length();
         std::vector<v8::Local<v8::Value>> call_args;
-        for (int i = 0; i < argc; i++) {
+        for (int32_t i = 0; i < argc; i++) {
             call_args.push_back(args[i]);
         }
         call_args.push_back(callback);
 
         v8::TryCatch try_catch(p_isolate);
         v8::MaybeLocal<v8::Value> result =
-            original->Call(context, v8::Undefined(p_isolate), (int) call_args.size(), call_args.data());
+            original->Call(context, v8::Undefined(p_isolate), (int32_t) call_args.size(), call_args.data());
 
         if (try_catch.HasCaught()) {
             resolver->Reject(context, try_catch.Exception()).Check();
