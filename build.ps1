@@ -54,7 +54,7 @@ $cppFlags = @(
 
 $linkFlags = @(
     "/OUT:z8.exe", "/SUBSYSTEM:CONSOLE", "/MACHINE:X64", "/NOLOGO",
-    "main.obj", "temporal_shims.obj", "console.obj", "fs.obj", "path.obj", "os.obj", "timer.obj",
+    "main.obj", "temporal_shims.obj", "console.obj", "fs.obj", "path.obj", "os.obj", "util.obj", "timer.obj",
     "V8\out.gn\x64.release\obj\v8_monolith.lib",
     "libcmt.lib", "libcpmt.lib",
     "winmm.lib", "dbghelp.lib", "shlwapi.lib", "user32.lib", "iphlpapi.lib",
@@ -75,7 +75,7 @@ if ($Config -eq "Debug") {
 
 # Step 1: Compile
 Write-Host "[1/3] Compiling C++ source files..."
-$sources = @("src/main.cpp", "src/temporal_shims.cpp", "src/module/console.cpp", "src/module/node/fs/fs.cpp", "src/module/node/path/path.cpp", "src/module/node/os/os.cpp", "src/module/timer.cpp")
+$sources = @("src/main.cpp", "src/temporal_shims.cpp", "src/module/console.cpp", "src/module/node/fs/fs.cpp", "src/module/node/path/path.cpp", "src/module/node/os/os.cpp", "src/module/node/util/util.cpp", "src/module/timer.cpp")
 & cl.exe $cppFlags $sources
 
 if ($LASTEXITCODE -ne 0) {

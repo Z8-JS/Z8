@@ -5,10 +5,12 @@
  */
 
 // Standard headers
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 // V8 headers
@@ -26,12 +28,11 @@
 #include "module/node/fs/fs.h"
 #include "module/node/os/os.h"
 #include "module/node/path/path.h"
+#include "module/node/util/util.h"
 #include "task_queue.h"
 #include "thread_pool.h"
 
-#include <chrono>
-#include <thread>
-
+// Windows headers
 #define NOMINMAX
 #ifdef _WIN32
 #include <windows.h>
@@ -252,6 +253,40 @@ class Runtime {
                     for (uint32_t i = 0; i < prop_names->Length(); ++i) {
                         v8::Local<v8::String> name = prop_names->Get(context, i).ToLocalChecked().As<v8::String>();
                         module->SetSyntheticModuleExport(isolate, name, fs_obj->Get(context, name).ToLocalChecked())
+                            .Check();
+                    }
+                    return v8::Undefined(isolate);
+                });
+            return module;
+        }
+
+        if (specifier_str == "node:util") {
+            v8::Local<v8::ObjectTemplate> util_template = z8::module::Util::createTemplate(isolate);
+            v8::Local<v8::Object> util_instance = util_template->NewInstance(context).ToLocalChecked();
+            v8::Local<v8::Array> prop_names = util_instance->GetPropertyNames(context).ToLocalChecked();
+
+            std::vector<v8::Local<v8::String>> export_names;
+            export_names.push_back(v8::String::NewFromUtf8Literal(isolate, "default"));
+            for (uint32_t i = 0; i < prop_names->Length(); ++i) {
+                export_names.push_back(prop_names->Get(context, i).ToLocalChecked().As<v8::String>());
+            }
+
+            auto module = v8::Module::CreateSyntheticModule(
+                isolate,
+                v8::String::NewFromUtf8Literal(isolate, "node:util"),
+                v8::MemorySpan<const v8::Local<v8::String>>(export_names.data(), export_names.size()),
+                [](v8::Local<v8::Context> context, v8::Local<v8::Module> module) -> v8::MaybeLocal<v8::Value> {
+                    v8::Isolate* isolate = v8::Isolate::GetCurrent();
+                    v8::Local<v8::ObjectTemplate> util_template = z8::module::Util::createTemplate(isolate);
+                    v8::Local<v8::Object> util_obj = util_template->NewInstance(context).ToLocalChecked();
+                    module
+                        ->SetSyntheticModuleExport(
+                            isolate, v8::String::NewFromUtf8Literal(isolate, "default"), util_obj)
+                        .Check();
+                    v8::Local<v8::Array> prop_names = util_obj->GetPropertyNames(context).ToLocalChecked();
+                    for (uint32_t i = 0; i < prop_names->Length(); ++i) {
+                        v8::Local<v8::String> name = prop_names->Get(context, i).ToLocalChecked().As<v8::String>();
+                        module->SetSyntheticModuleExport(isolate, name, util_obj->Get(context, name).ToLocalChecked())
                             .Check();
                     }
                     return v8::Undefined(isolate);
