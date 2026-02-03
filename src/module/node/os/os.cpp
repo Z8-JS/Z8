@@ -26,7 +26,7 @@ namespace module {
 static std::string wstringToString(const std::wstring& wstr) {
     if (wstr.empty())
         return "";
-    int size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int) wstr.size(), NULL, 0, NULL, NULL);
+    int32_t size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int) wstr.size(), NULL, 0, NULL, NULL);
     std::string strTo(size_needed, 0);
     WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int) wstr.size(), &strTo[0], size_needed, NULL, NULL);
     return strTo;
@@ -271,13 +271,13 @@ void OS::networkInterfaces(const v8::FunctionCallbackInfo<v8::Value>& args) {
             while (pUnicast) {
                 sockaddr* sa = pUnicast->Address.lpSockaddr;
                 char buf[NI_MAXHOST];
-                int res = getnameinfo(sa,
-                                      (sa->sa_family == AF_INET) ? sizeof(sockaddr_in) : sizeof(sockaddr_in6),
-                                      buf,
-                                      sizeof(buf),
-                                      NULL,
-                                      0,
-                                      NI_NUMERICHOST);
+                int32_t res = getnameinfo(sa,
+                                          (sa->sa_family == AF_INET) ? sizeof(sockaddr_in) : sizeof(sockaddr_in6),
+                                          buf,
+                                          sizeof(buf),
+                                          NULL,
+                                          0,
+                                          NI_NUMERICHOST);
 
                 if (res == 0) {
 
@@ -423,7 +423,7 @@ void OS::getPriority(const v8::FunctionCallbackInfo<v8::Value>& args) {
     DWORD priorityClass = GetPriorityClass(hProcess);
     CloseHandle(hProcess);
 
-    int priority = 0;
+    int32_t priority = 0;
     switch (priorityClass) {
     case IDLE_PRIORITY_CLASS:
         priority = 19;
@@ -451,7 +451,7 @@ void OS::getPriority(const v8::FunctionCallbackInfo<v8::Value>& args) {
 void OS::setPriority(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     DWORD pid = 0;
-    int priority = 0;
+    int32_t priority = 0;
 
     if (args.Length() == 1) {
         pid = GetCurrentProcessId();

@@ -1082,7 +1082,7 @@ void FS::fchownSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
             v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "Invalid arguments")));
         return;
     }
-    int fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
     uid_t uid = static_cast<uid_t>(args[1]->Int32Value(p_context).FromMaybe(-1));
     gid_t gid = static_cast<gid_t>(args[2]->Int32Value(p_context).FromMaybe(-1));
     if (fchown(fd, uid, gid) != 0) {
@@ -4558,7 +4558,7 @@ void FS::mkdtempSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
 #ifdef _WIN32
     // Simple implementation for Windows
     // Simple implementation for Windows
-    for (int i = 0; i < 100; ++i) {
+    for (int32_t i = 0; i < 100; ++i) {
         std::string path = std::string(*prefix) + generate_random_string(6);
         std::error_code ec;
         if (fs::create_directory(path, ec)) {
@@ -4860,7 +4860,7 @@ void FS::mkdtemp(const v8::FunctionCallbackInfo<v8::Value>& args) {
         std::string template_str = p_ctx->m_prefix + "XXXXXX";
 #ifdef _WIN32
         bool found = false;
-        for (int i = 0; i < 100; ++i) {
+        for (int32_t i = 0; i < 100; ++i) {
             std::string path = p_ctx->m_prefix + generate_random_string(6);
             std::error_code ec;
             if (fs::create_directory(path, ec)) {
@@ -4926,7 +4926,7 @@ void FS::mkdtempPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         std::string template_str = p_ctx->m_prefix + "XXXXXX";
 #ifdef _WIN32
         bool found = false;
-        for (int i = 0; i < 100; ++i) {
+        for (int32_t i = 0; i < 100; ++i) {
             std::string path = p_ctx->m_prefix + generate_random_string(6);
             std::error_code ec;
             if (fs::create_directory(path, ec)) {
@@ -5335,9 +5335,9 @@ void FS::lutimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 struct ChownCtx {
     std::string m_path;
-    int m_fd = -1;
-    int m_uid;
-    int m_gid;
+    int32_t m_fd = -1;
+    int32_t m_uid;
+    int32_t m_gid;
     bool m_is_fd = false;
     bool m_is_lchown = false;
     bool m_is_error = false;
@@ -5350,8 +5350,8 @@ void FS::chown(const v8::FunctionCallbackInfo<v8::Value>& args) {
     if (args.Length() < 4 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
         return;
     v8::String::Utf8Value path(p_isolate, args[0]);
-    int uid = args[1]->Int32Value(p_context).FromMaybe(-1);
-    int gid = args[2]->Int32Value(p_context).FromMaybe(-1);
+    int32_t uid = args[1]->Int32Value(p_context).FromMaybe(-1);
+    int32_t gid = args[2]->Int32Value(p_context).FromMaybe(-1);
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
     auto p_ctx = new ChownCtx();
@@ -5394,9 +5394,9 @@ void FS::fchown(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
     if (args.Length() < 4 || !args[0]->IsInt32() || !args[args.Length() - 1]->IsFunction())
         return;
-    int fd = args[0]->Int32Value(p_context).FromMaybe(-1);
-    int uid = args[1]->Int32Value(p_context).FromMaybe(-1);
-    int gid = args[2]->Int32Value(p_context).FromMaybe(-1);
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    int32_t uid = args[1]->Int32Value(p_context).FromMaybe(-1);
+    int32_t gid = args[2]->Int32Value(p_context).FromMaybe(-1);
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
     auto p_ctx = new ChownCtx();
@@ -5441,8 +5441,8 @@ void FS::lchown(const v8::FunctionCallbackInfo<v8::Value>& args) {
     if (args.Length() < 4 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
         return;
     v8::String::Utf8Value path(p_isolate, args[0]);
-    int uid = args[1]->Int32Value(p_context).FromMaybe(-1);
-    int gid = args[2]->Int32Value(p_context).FromMaybe(-1);
+    int32_t uid = args[1]->Int32Value(p_context).FromMaybe(-1);
+    int32_t gid = args[2]->Int32Value(p_context).FromMaybe(-1);
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
     auto p_ctx = new ChownCtx();
@@ -5493,8 +5493,8 @@ void FS::chownPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(p_resolver->GetPromise());
 
     v8::String::Utf8Value path(p_isolate, args[0]);
-    int uid = args[1]->Int32Value(p_context).FromMaybe(-1);
-    int gid = args[2]->Int32Value(p_context).FromMaybe(-1);
+    int32_t uid = args[1]->Int32Value(p_context).FromMaybe(-1);
+    int32_t gid = args[2]->Int32Value(p_context).FromMaybe(-1);
 
     auto p_ctx = new ChownCtx();
     p_ctx->m_path = *path;
@@ -5543,9 +5543,9 @@ void FS::fchownPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     args.GetReturnValue().Set(p_resolver->GetPromise());
 
-    int fd = args[0]->Int32Value(p_context).FromMaybe(-1);
-    int uid = args[1]->Int32Value(p_context).FromMaybe(-1);
-    int gid = args[2]->Int32Value(p_context).FromMaybe(-1);
+    int32_t fd = args[0]->Int32Value(p_context).FromMaybe(-1);
+    int32_t uid = args[1]->Int32Value(p_context).FromMaybe(-1);
+    int32_t gid = args[2]->Int32Value(p_context).FromMaybe(-1);
 
     auto p_ctx = new ChownCtx();
     p_ctx->m_fd = fd;
@@ -5596,8 +5596,8 @@ void FS::lchownPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(p_resolver->GetPromise());
 
     v8::String::Utf8Value path(p_isolate, args[0]);
-    int uid = args[1]->Int32Value(p_context).FromMaybe(-1);
-    int gid = args[2]->Int32Value(p_context).FromMaybe(-1);
+    int32_t uid = args[1]->Int32Value(p_context).FromMaybe(-1);
+    int32_t gid = args[2]->Int32Value(p_context).FromMaybe(-1);
 
     auto p_ctx = new ChownCtx();
     p_ctx->m_path = *path;
@@ -5710,7 +5710,7 @@ void FS::opendirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
 }
 
 struct ReadVCtx {
-    int m_fd;
+    int32_t m_fd;
     int64_t m_position;
     std::vector<size_t> m_buffer_lengths;
     std::vector<std::vector<char>> m_results;
@@ -5814,7 +5814,7 @@ void FS::readv(const v8::FunctionCallbackInfo<v8::Value>& args) {
 }
 
 struct WriteVCtx {
-    int m_fd;
+    int32_t m_fd;
     int64_t m_position;
     std::vector<std::vector<char>> m_buffers;
     size_t m_total_written = 0;

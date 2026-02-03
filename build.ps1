@@ -6,6 +6,18 @@ param(
     [string]$Config = "Release"
 )
 
+# Step -2: Check coding style
+Write-Host "[Step] Checking coding style..."
+if (Test-Path "tools/check_style.py") {
+    python tools/check_style.py ./src/
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Coding style check failed! Please fix the errors before building."
+        exit 1
+    }
+} else {
+    Write-Warning "Style checker (tools/check_style.py) not found. Skipping..."
+}
+
 # Step -1: Ensure MSVC environment is loaded
 if (-not $env:INCLUDE) {
     Write-Host "MSVC environment not detected. Attempting to locate Visual Studio..."

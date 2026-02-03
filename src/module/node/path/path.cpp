@@ -37,7 +37,7 @@ void Path::resolve(const v8::FunctionCallbackInfo<v8::Value>& args) {
     fs::path resolved;
     bool absolute_found = false;
 
-    for (int i = args.Length() - 1; i >= 0; --i) {
+    for (int32_t i = args.Length() - 1; i >= 0; --i) {
         v8::String::Utf8Value segment(p_isolate, args[i]);
         if (*segment == nullptr)
             continue;
@@ -68,7 +68,7 @@ void Path::join(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     fs::path joined;
 
-    for (int i = 0; i < args.Length(); ++i) {
+    for (int32_t i = 0; i < args.Length(); ++i) {
         v8::String::Utf8Value segment(p_isolate, args[i]);
         if (*segment == nullptr || strlen(*segment) == 0)
             continue;
