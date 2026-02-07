@@ -120,7 +120,20 @@ def main():
     
     # Determine what to check
     if len(sys.argv) > 1:
-        target = Path(sys.argv[1])
+        # Get the absolute path and validate it's within project
+        try:
+            target = Path(sys.argv[1]).resolve(strict=False)
+            project_root = Path(__file__).parent.parent.resolve()
+            
+            # Security: Prevent path traversal outside project directory
+            try:
+                target.relative_to(project_root)
+            except ValueError:
+                print(f"Error: Path '{sys.argv[1]}' is outside the project directory")
+                sys.exit(1)
+        except (OSError, RuntimeError) as e:
+            print(f"Error: Invalid path '{sys.argv[1]}': {e}")
+            sys.exit(1)
     else:
         # Default to src directory
         target = Path(__file__).parent.parent / 'src'

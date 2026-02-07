@@ -507,6 +507,36 @@ class Runtime {
 
 namespace fs = std::filesystem;
 
+// Validate and sanitize file path to prevent path traversal attacks
+bool ValidatePath(const std::string& path, std::string& sanitized_path) {
+    try {
+        // Resolve to canonical absolute path
+        fs::path canonical = fs::canonical(path);
+
+        // Get current working directory
+        fs::path cwd = fs::current_path();
+
+        // Convert to strings for comparison
+        std::string canonical_str = canonical.string();
+        std::string cwd_str = cwd.string();
+
+        // Check for common path traversal patterns in the original path
+        if (path.find("..") != std::string::npos) {
+            // Only allow if the canonical path is still within or below CWD
+            // This allows legitimate use of .. that doesn't escape
+            if (canonical_str.find(cwd_str) != 0) {
+                return false;
+            }
+        }
+
+        sanitized_path = canonical_str;
+        return true;
+    } catch (const fs::filesystem_error&) {
+        // Path doesn't exist or other filesystem error
+        return false;
+    }
+}
+
 // Helper to read file
 std::string ReadFile(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
@@ -540,11 +570,19 @@ int main(int argc, char* argv[]) {
         filename = "eval";
         source = argv[2];
     } else {
-        filename = argv[1];
+        std::string raw_filename = argv[1];
+
+        // Validate and sanitize the path to prevent path traversal attacks
+        if (!ValidatePath(raw_filename, filename)) {
+            std::cerr << "✖ Error: Invalid or inaccessible file path: " << raw_filename << std::endl;
+            return 1;
+        }
+
         if (!fs::exists(filename)) {
             std::cerr << "✖ Error: File not found: " << filename << std::endl;
             return 1;
         }
+
         source = ReadFile(filename);
         if (source.empty()) {
             // Check if file is actually empty or read failed
