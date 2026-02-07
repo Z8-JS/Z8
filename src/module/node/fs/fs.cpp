@@ -98,6 +98,28 @@ fs::file_time_type V8MillisecondsToFileTime(double ms) {
     return fs::file_time_type::clock::now() + (system_time - std::chrono::system_clock::now());
 }
 
+static inline bool isPathSafe(const char* p_path) {
+    if (!p_path || p_path[0] == '\0')
+        return false;
+
+    // Block absolute paths and UNC paths
+    if (p_path[0] == '/' || p_path[0] == '\\')
+        return false;
+
+    // Block drive letters
+    if (p_path[0] != '\0' && p_path[1] == ':')
+        return false;
+
+    // Use SIMD-optimized strchr to jump directly to dots
+    const char* p = strchr(p_path, '.');
+    while (p) {
+        if (p[1] == '.')
+            return false; // Found ".."
+        p = strchr(p + 1, '.');
+    }
+    return true;
+}
+
 v8::Local<v8::Value> FileTimeToV8Date(v8::Isolate* p_isolate, fs::file_time_type ftime) {
     auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
         ftime - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
@@ -351,7 +373,16 @@ void FS::readFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     v8::String::Utf8Value path_val(p_isolate, args[0]);
-    std::string path(*path_val);
+    if (*path_val == nullptr)
+        return;
+
+    // Zero-overhead validation
+    if (!isPathSafe(*path_val)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
 
     std::string encoding = "";
     if (args.Length() >= 2 && args[1]->IsString()) {
@@ -367,7 +398,8 @@ void FS::readFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
         }
     }
 
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    // Pass the raw pointer directly to avoid extra std::string allocation/copy
+    std::ifstream file(*path_val, std::ios::binary | std::ios::ate);
     if (!file.is_open()) {
         p_isolate->ThrowException(
             v8::String::NewFromUtf8(p_isolate, "Error: ENOENT: no such file or directory").ToLocalChecked());
@@ -399,13 +431,24 @@ void FS::writeFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::HandleScope handle_scope(p_isolate);
 
-    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) {
+    if (args.Length() < 2 || !args[0]->IsString() || (!args[1]->IsString() && !args[1]->IsUint8Array())) {
         p_isolate->ThrowException(
-            v8::String::NewFromUtf8(p_isolate, "TypeError: Path and data must be strings").ToLocalChecked());
+            v8::String::NewFromUtf8(p_isolate, "TypeError: Path and data must be strings or Uint8Array")
+                .ToLocalChecked());
         return;
     }
 
     v8::String::Utf8Value path_val(p_isolate, args[0]);
+    if (*path_val == nullptr)
+        return;
+
+    if (!isPathSafe(*path_val)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
+
     v8::String::Utf8Value data_val(p_isolate, args[1]);
 
     std::ofstream file(*path_val, std::ios::binary);
@@ -430,6 +473,16 @@ void FS::appendFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     v8::String::Utf8Value path_val(p_isolate, args[0]);
+    if (*path_val == nullptr)
+        return;
+
+    if (!isPathSafe(*path_val)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
+
     v8::String::Utf8Value data_val(p_isolate, args[1]);
 
     std::ofstream file(*path_val, std::ios::binary | std::ios::app);
@@ -693,7 +746,18 @@ void FS::existsSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     v8::String::Utf8Value path_val(p_isolate, args[0]);
-    args.GetReturnValue().Set(fs::exists(std::string(*path_val)));
+    if (*path_val == nullptr) {
+        args.GetReturnValue().Set(false);
+        return;
+    }
+
+    // Quick security check before disk hit
+    if (!isPathSafe(*path_val)) {
+        args.GetReturnValue().Set(false);
+        return;
+    }
+
+    args.GetReturnValue().Set(fs::exists(*path_val));
 }
 
 v8::Local<v8::Object>
@@ -783,6 +847,15 @@ void FS::statSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     v8::String::Utf8Value path_val(p_isolate, args[0]);
+    if (*path_val == nullptr)
+        return;
+
+    if (!isPathSafe(*path_val)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     std::error_code ec;
     auto stats = createStats(p_isolate, *path_val, ec, true);
 
@@ -806,11 +879,18 @@ void FS::mkdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     v8::String::Utf8Value path_val(p_isolate, args[0]);
-    std::string path(*path_val);
-    std::error_code ec;
+    if (*path_val == nullptr)
+        return;
 
+    if (!isPathSafe(*path_val)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
+    std::error_code ec;
     // Equivalent to mkdir -p
-    fs::create_directories(path, ec);
+    fs::create_directories(*path_val, ec);
 
     if (ec) {
         p_isolate->ThrowException(
@@ -830,11 +910,18 @@ void FS::rmSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     v8::String::Utf8Value path_val(p_isolate, args[0]);
-    std::string path(*path_val);
-    std::error_code ec;
+    if (*path_val == nullptr)
+        return;
 
+    if (!isPathSafe(*path_val)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
+    std::error_code ec;
     // Equivalent to rm -rf
-    fs::remove_all(path, ec);
+    fs::remove_all(*path_val, ec);
 
     if (ec) {
         p_isolate->ThrowException(
@@ -854,6 +941,15 @@ void FS::lstatSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     v8::String::Utf8Value path_val(p_isolate, args[0]);
+    if (*path_val == nullptr)
+        return;
+
+    if (!isPathSafe(*path_val)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     std::error_code ec;
     auto stats = createStats(p_isolate, *path_val, ec, false);
 
@@ -878,7 +974,15 @@ void FS::readdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     v8::String::Utf8Value path_val(p_isolate, args[0]);
-    std::string path(*path_val);
+    if (*path_val == nullptr)
+        return;
+
+    if (!isPathSafe(*path_val)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     std::error_code ec;
 
     bool withFileTypes = false;
@@ -891,7 +995,7 @@ void FS::readdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     std::vector<v8::Local<v8::Value>> entries;
-    for (const auto& entry : fs::directory_iterator(path, ec)) {
+    for (const auto& entry : fs::directory_iterator(*path_val, ec)) {
         if (withFileTypes) {
             entries.push_back(FS::createDirent(p_isolate, entry));
         } else {
@@ -921,6 +1025,16 @@ void FS::renameSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::String::Utf8Value old_path(p_isolate, args[0]);
     v8::String::Utf8Value new_path(p_isolate, args[1]);
+
+    if (*old_path == nullptr || *new_path == nullptr)
+        return;
+
+    if (!isPathSafe(*old_path) || !isPathSafe(*new_path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     std::error_code ec;
 
     fs::rename(*old_path, *new_path, ec);
@@ -943,6 +1057,16 @@ void FS::copyFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::String::Utf8Value src(p_isolate, args[0]);
     v8::String::Utf8Value dest(p_isolate, args[1]);
+
+    if (*src == nullptr || *dest == nullptr)
+        return;
+
+    if (!isPathSafe(*src) || !isPathSafe(*dest)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     std::error_code ec;
 
     fs::copy_file(*src, *dest, fs::copy_options::overwrite_existing, ec);
@@ -963,6 +1087,15 @@ void FS::realpathSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     std::error_code ec;
 
     fs::path p = fs::canonical(*path, ec); // Canonical is good for realpath
@@ -986,6 +1119,15 @@ void FS::accessSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     std::error_code ec;
 
     if (!fs::exists(*path, ec)) {
@@ -1004,6 +1146,15 @@ void FS::rmdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     }
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     std::error_code ec;
     fs::remove(*path, ec);
     if (ec) {
@@ -1021,6 +1172,15 @@ void FS::unlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     }
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     std::error_code ec;
     fs::remove(*path, ec);
     if (ec) {
@@ -1040,6 +1200,15 @@ void FS::chmodSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     }
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     int32_t mode = args[1]->Int32Value(p_context).FromMaybe(0);
     std::error_code ec;
     fs::permissions(*path, static_cast<fs::perms>(mode), ec);
@@ -1122,6 +1291,15 @@ void FS::utimesSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     }
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     double atime = args[1]->NumberValue(p_context).FromMaybe(0);
     double mtime = args[2]->NumberValue(p_context).FromMaybe(0);
 
@@ -1145,6 +1323,15 @@ void FS::readlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     }
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     std::error_code ec;
     fs::path target = fs::read_symlink(*path, ec);
     if (ec) {
@@ -1165,35 +1352,42 @@ void FS::symlinkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
     v8::String::Utf8Value target_val(p_isolate, args[0]);
     v8::String::Utf8Value path_val(p_isolate, args[1]);
-    std::string target_str = *target_val;
-    std::string path_str = *path_val;
+
+    if (*target_val == nullptr || *path_val == nullptr)
+        return;
+
+    if (!isPathSafe(*target_val) || !isPathSafe(*path_val)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     std::error_code ec;
 
     // Optional 'type' argument (args[2])
-    // For simplicity, we'll infer type from target or default to file symlink.
-    // A more robust implementation would parse "dir", "file", "junction" from args[2].
     bool is_dir_symlink = false;
     if (args.Length() >= 3 && args[2]->IsString()) {
         v8::String::Utf8Value type_val(p_isolate, args[2]);
-        std::string type_str = *type_val;
-        if (type_str == "dir" || type_str == "junction") {
-            is_dir_symlink = true;
-        } else if (type_str == "file") {
-            is_dir_symlink = false;
+        if (*type_val != nullptr) {
+            std::string_view type_str(*type_val);
+            if (type_str == "dir" || type_str == "junction") {
+                is_dir_symlink = true;
+            } else if (type_str == "file") {
+                is_dir_symlink = false;
+            }
         }
     } else {
         // If type is not specified, try to infer from target
-        is_dir_symlink = fs::is_directory(target_str, ec);
+        is_dir_symlink = fs::is_directory(*target_val, ec);
         if (ec) {
-            // If is_directory check fails, proceed assuming file symlink or throw if critical
-            ec.clear(); // Clear error for is_directory check if we're just inferring
+            ec.clear();
         }
     }
 
     if (is_dir_symlink) {
-        fs::create_directory_symlink(target_str, path_str, ec);
+        fs::create_directory_symlink(*target_val, *path_val, ec);
     } else {
-        fs::create_symlink(target_str, path_str, ec);
+        fs::create_symlink(*target_val, *path_val, ec);
     }
 
     if (ec) {
@@ -1213,6 +1407,16 @@ void FS::linkSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
     v8::String::Utf8Value target(p_isolate, args[0]);
     v8::String::Utf8Value path(p_isolate, args[1]);
+
+    if (*target == nullptr || *path == nullptr)
+        return;
+
+    if (!isPathSafe(*target) || !isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     std::error_code ec;
     fs::create_hard_link(*target, *path, ec);
     if (ec) {
@@ -1228,6 +1432,15 @@ void FS::truncateSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     if (args.Length() < 1 || !args[0]->IsString())
         return;
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     uintmax_t length = 0;
     if (args.Length() >= 2 && args[1]->IsNumber())
         length = static_cast<uintmax_t>(args[1]->NumberValue(p_isolate->GetCurrentContext()).FromMaybe(0));
@@ -1247,6 +1460,15 @@ void FS::openSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     int32_t flags = 0;
 
     if (args.Length() >= 2) {
@@ -1254,21 +1476,23 @@ void FS::openSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
             flags = args[1]->Int32Value(p_context).FromMaybe(0);
         } else if (args[1]->IsString()) {
             v8::String::Utf8Value flags_str(p_isolate, args[1]);
-            std::string f(*flags_str);
-            if (f == "r")
-                flags = O_RDONLY;
-            else if (f == "r+")
-                flags = O_RDWR;
-            else if (f == "w")
-                flags = O_WRONLY | O_CREAT | O_TRUNC;
-            else if (f == "w+")
-                flags = O_RDWR | O_CREAT | O_TRUNC;
-            else if (f == "a")
-                flags = O_WRONLY | O_CREAT | O_APPEND;
-            else if (f == "a+")
-                flags = O_RDWR | O_CREAT | O_APPEND;
-            else
-                flags = O_RDONLY;
+            if (*flags_str != nullptr) {
+                std::string_view f(*flags_str);
+                if (f == "r")
+                    flags = O_RDONLY;
+                else if (f == "r+")
+                    flags = O_RDWR;
+                else if (f == "w")
+                    flags = O_WRONLY | O_CREAT | O_TRUNC;
+                else if (f == "w+")
+                    flags = O_RDWR | O_CREAT | O_TRUNC;
+                else if (f == "a")
+                    flags = O_WRONLY | O_CREAT | O_APPEND;
+                else if (f == "a+")
+                    flags = O_RDWR | O_CREAT | O_APPEND;
+                else
+                    flags = O_RDONLY;
+            }
         }
     } else {
         flags = O_RDONLY;
@@ -1540,6 +1764,15 @@ void FS::readFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
     auto p_ctx = new ReadFileCtx();
@@ -1615,6 +1848,17 @@ void FS::readFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(p_resolver->GetPromise());
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked())
+            .Check();
+        return;
+    }
+
     auto p_ctx = new ReadFileCtx();
     p_ctx->m_path = *path;
 
@@ -1693,6 +1937,15 @@ void FS::writeFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
     auto p_ctx = new WriteFileCtx();
@@ -1754,6 +2007,17 @@ void FS::writeFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(p_resolver->GetPromise());
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked())
+            .Check();
+        return;
+    }
+
     auto p_ctx = new WriteFileCtx();
     p_ctx->m_path = *path;
 
@@ -1817,6 +2081,13 @@ void FS::stat(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
     auto p_ctx = new StatCtx();
@@ -1862,6 +2133,17 @@ void FS::statPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(p_resolver->GetPromise());
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked())
+            .Check();
+        return;
+    }
+
     auto p_ctx = new StatCtx();
     p_ctx->m_path = *path;
 
@@ -1906,6 +2188,15 @@ void FS::unlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
     auto p_ctx = new UnlinkCtx();
@@ -1950,6 +2241,17 @@ void FS::unlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(p_resolver->GetPromise());
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked())
+            .Check();
+        return;
+    }
+
     auto p_ctx = new UnlinkCtx();
     p_ctx->m_path = *path;
 
@@ -1995,6 +2297,15 @@ void FS::mkdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
     auto p_ctx = new MkdirCtx();
@@ -2040,6 +2351,17 @@ void FS::mkdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(p_resolver->GetPromise());
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked())
+            .Check();
+        return;
+    }
+
     auto p_ctx = new MkdirCtx();
     p_ctx->m_path = *path;
 
@@ -2088,6 +2410,15 @@ void FS::readdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (*path == nullptr)
+        return;
+
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed").ToLocalChecked());
+        return;
+    }
+
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
 
     auto p_ctx = new ReaddirCtx();
