@@ -165,7 +165,18 @@ void process() {
 
 ---
 
-## 6. Tại sao chúng ta sử dụng các quy tắc này?
+## 6. Quy tắc Hiệu năng (Performance Rules)
+
+Để đảm bảo Z8 luôn giữ vững vị thế là một engine JavaScript hiệu năng cao.
+
+### Quy tắc:
+
+- **Giới hạn Overhead**: Mọi bản sửa lỗi hoặc tính năng mới **không được phép** làm giảm hiệu năng quá **1%** so với phiên bản trước đó.
+- **Kiểm chuẩn bắt buộc**: Phải chạy benchmark so sánh (ví dụ: dùng `hyperfine` hoặc `bench_io.js`) trước khi merge code.
+
+---
+
+## 7. Tại sao chúng ta sử dụng các quy tắc này?
 
 1.  **Tính nhất quán**: Mã nguồn trông sạch sẽ và dễ đọc khi tất cả các thành viên trong nhóm tuân thủ cùng một phong cách.
 2.  **Độ tin cậy**: Việc biết chính xác một biến chiếm bao nhiêu bit giúp loại bỏ hoàn toàn các lỗi "undefined behavior" khi biên dịch mã nguồn trên các hệ điều hành khác nhau (ví dụ: `long` trên Windows là 32-bit nhưng trên Linux x64 lại là 64-bit).

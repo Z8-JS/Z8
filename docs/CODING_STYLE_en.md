@@ -144,7 +144,18 @@ void process() {
 
 ---
 
-## 6. Rationale
+## 6. Performance Rules
+
+To ensure Z8 remains a high-performance JavaScript engine.
+
+### Rules:
+
+- **Overhead Limit**: Every bug fix or new feature **must not** increase performance overhead by more than **1%** compared to the previous version.
+- **Mandatory Benchmarking**: Comparative benchmarks (e.g., using `hyperfine` or `bench_io.js`) must be run before merging code.
+
+---
+
+## 7. Rationale
 
 1.  **Consistency**: The source code looks clean and is easy to read when all team members follow the same style.
 2.  **Reliability**: Knowing exactly how many bits a variable occupies eliminates "undefined behavior" when compiling across different operating systems.

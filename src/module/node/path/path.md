@@ -9,9 +9,9 @@
 | path.join([...paths])       | ✅ Done |
 | path.normalize(path)        | ✅ Done |
 | path.parse(path)            | ✅ Done |
-| path.posix                  |         |
+| path.posix                  | ✅ Done |
 | path.relative(from, to)     | ✅ Done |
 | path.resolve([...paths])    | ✅ Done |
 | path.sep                    | ✅ Done |
 | path.toNamespacedPath(path) | ✅ Done |
-| path.win32                  |         |
+| path.win32                  | ✅ Done |
