@@ -1,29 +1,42 @@
-const util = require('node:util');
+import util from 'node:util';
 
-// Test format
-console.log(util.format('%s:%s', 'foo', 'bar', 'baz'));
+console.log('--- util.format ---');
+console.log(util.format('Hello %s', 'Z8'));
+console.log(util.format('%d + %d = %d', 1, 2, 3));
+console.log(util.format('JSON: %j', { a: 1 }));
 
-// Test inspect
-const obj = { a: 1, b: { c: 2 } };
-console.log(util.inspect(obj, { colors: true, depth: null }));
+console.log('\n--- util.types ---');
+console.log('isDate(new Date()):', util.types.isDate(new Date()));
+console.log('isRegExp(/abc/):', util.types.isRegExp(/abc/));
+console.log('isPromise(Promise.resolve()):', util.types.isPromise(Promise.resolve()));
+console.log('isAsyncFunction(async () => {}):', util.types.isAsyncFunction(async () => {}));
+console.log('isUint8Array(new Uint8Array()):', util.types.isUint8Array(new Uint8Array()));
+console.log('isBoxedPrimitive(new Number(1)):', util.types.isBoxedPrimitive(new Number(1)));
+console.log('isBoxedPrimitive(1):', util.types.isBoxedPrimitive(1));
 
-// Test promisify
-const fs = require('node:fs');
-const readFile = util.promisify(fs.readFile);
-readFile(__filename).then(data => {
-    console.log('Promisified read length:', data.length);
-}).catch(err => {
-    console.error('Promisify error:', err);
+console.log('\n--- util.promisify ---');
+const readFile = (path, cb) => {
+    setTimeout(() => cb(null, `Content of ${path}`), 10);
+};
+const readFileAsync = util.promisify(readFile);
+readFileAsync('test.txt').then(content => {
+    console.log('promisify result:', content);
 });
 
-// Test inherits
-function Parent() { this.name = 'parent'; }
-Parent.prototype.sayHi = function() { console.log('Hi from', this.name); };
-function Child() { Parent.call(this); this.name = 'child'; }
-util.inherits(Child, Parent);
-const c = new Child();
-c.sayHi();
+console.log('\n--- util.callbackify ---');
+const asyncFunc = async (val) => {
+    return `Async result: ${val}`;
+};
+const callbackFunc = util.callbackify(asyncFunc);
+callbackFunc('hello', (err, result) => {
+    console.log('callbackify result:', result);
+});
 
-// Test types
-console.log('Is Date:', util.types.isDate(new Date()));
-console.log('Is Promise:', util.types.isPromise(Promise.resolve()));
+console.log('\n--- util.inherits ---');
+function Parent() {}
+Parent.prototype.sayHi = function() { console.log('Hi from Parent'); };
+function Child() {}
+util.inherits(Child, Parent);
+const child = new Child();
+console.log('child instance of Parent:', child instanceof Parent);
+if (child.sayHi) child.sayHi();
