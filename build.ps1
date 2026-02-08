@@ -6,8 +6,8 @@ param(
     [string]$Config = "Release"
 )
 
-# Step -2: Check coding style
-Write-Host "[Step] Checking coding style..."
+# Step 0: Check coding style
+Write-Host "[Step 0/4] Checking coding style..."
 if (Test-Path "tools/check_style.py") {
     python tools/check_style.py ./src/
     if ($LASTEXITCODE -ne 0) {
@@ -18,7 +18,8 @@ if (Test-Path "tools/check_style.py") {
     Write-Warning "Style checker (tools/check_style.py) not found. Skipping..."
 }
 
-# Step -1: Ensure MSVC environment is loaded
+# Step 1: Ensure MSVC environment is loaded
+Write-Host "[Step 1/4] Ensuring MSVC environment is loaded..."
 if (-not $env:INCLUDE) {
     Write-Host "MSVC environment not detected. Attempting to locate Visual Studio..."
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -49,9 +50,9 @@ if (-not (Get-Command "cl.exe" -ErrorAction SilentlyContinue)) {
 Write-Host "Building Zane V8 (Z8)..."
 Write-Host "Configuration: $Config"
 
-# Step 0: Extract Shims
+# Step 2: Extract Shims
+Write-Host "[Step 2/4] Extracting Temporal shims..."
 if (Test-Path "v8/libs/v8_monolith.lib") {
-    Write-Host "[0/3] Regenerating Temporal shims..."
     python tools/extract_shims.py
 }
 
@@ -85,8 +86,8 @@ if ($Config -eq "Debug") {
     $linkFlags += "/DEBUG"
 }
 
-# Step 1: Compile
-Write-Host "[1/3] Compiling C++ source files..."
+# Step 3: Compile
+Write-Host "[3/4] Compiling C++ source files..."
 $sources = @("src/main.cpp", "src/temporal_shims.cpp", "src/module/console.cpp", "src/module/node/fs/fs.cpp", "src/module/node/path/path.cpp", "src/module/node/os/os.cpp", "src/module/node/util/util.cpp", "src/module/timer.cpp")
 & cl.exe $cppFlags $sources
 
@@ -95,8 +96,8 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Step 2: Link
-Write-Host "[2/3] Linking z8.exe..."
+# Step 4: Link
+Write-Host "[4/4] Linking z8.exe..."
 & link.exe $linkFlags
 
 if ($LASTEXITCODE -ne 0) {

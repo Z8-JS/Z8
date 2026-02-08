@@ -508,28 +508,23 @@ class Runtime {
 namespace fs = std::filesystem;
 
 // Validate and sanitize file path to prevent path traversal attacks
-bool ValidatePath(const std::string& path, std::string& sanitized_path) {
+// Validate and sanitize file path to prevent path traversal attacks
+bool ValidatePath(const std::string& path_str, fs::path& sanitized_path) {
     try {
         // Resolve to canonical absolute path
-        fs::path canonical = fs::canonical(path);
+        fs::path canonical = fs::canonical(path_str);
 
         // Get current working directory
         fs::path cwd = fs::current_path();
 
-        // Convert to strings for comparison
-        std::string canonical_str = canonical.string();
-        std::string cwd_str = cwd.string();
+        // Check if canonical path starts with cwd using robust component comparison
+        auto mismatch_pair = std::mismatch(cwd.begin(), cwd.end(), canonical.begin());
 
-        // Check for common path traversal patterns in the original path
-        if (path.find("..") != std::string::npos) {
-            // Only allow if the canonical path is still within or below CWD
-            // This allows legitimate use of .. that doesn't escape
-            if (canonical_str.find(cwd_str) != 0) {
-                return false;
-            }
+        if (mismatch_pair.first != cwd.end()) {
+            return false;
         }
 
-        sanitized_path = canonical_str;
+        sanitized_path = canonical;
         return true;
     } catch (const fs::filesystem_error&) {
         // Path doesn't exist or other filesystem error
@@ -538,7 +533,7 @@ bool ValidatePath(const std::string& path, std::string& sanitized_path) {
 }
 
 // Helper to read file
-std::string ReadFile(const std::string& path) {
+std::string ReadFile(const fs::path& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open())
         return "";
@@ -563,7 +558,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    std::string filename;
+    fs::path filename;
     std::string source;
 
     if (std::string(argv[1]) == "-e" && argc > 2) {
@@ -597,7 +592,7 @@ int main(int argc, char* argv[]) {
     bool success = false;
     {
         z8::Runtime rt;
-        success = rt.Run(source, filename);
+        success = rt.Run(source, filename.string());
     }
 
     z8::Runtime::Shutdown();
