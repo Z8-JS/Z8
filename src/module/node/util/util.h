@@ -2,6 +2,8 @@
 #define Z8_MODULE_UTIL_H
 
 #include "v8.h"
+#include <cstdio>
+#include <string>
 
 namespace z8 {
 namespace module {
@@ -15,6 +17,12 @@ class Util {
     static void callbackify(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void inherits(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void inspect(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static std::string inspectInternal(v8::Isolate* p_isolate,
+                                       v8::Local<v8::Value> value,
+                                       int32_t depth = 2,
+                                       int32_t current_depth = 0,
+                                       bool colors = false);
+    static bool shouldLogWithColors(FILE* p_stream);
 
     // util.types
     static v8::Local<v8::ObjectTemplate> createTypesTemplate(v8::Isolate* p_isolate);

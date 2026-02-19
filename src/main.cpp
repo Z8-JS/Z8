@@ -28,6 +28,7 @@
 #include "module/node/fs/fs.h"
 #include "module/node/os/os.h"
 #include "module/node/path/path.h"
+#include "module/node/process/process.h"
 #include "module/node/util/util.h"
 #include "task_queue.h"
 #include "thread_pool.h"
@@ -100,6 +101,10 @@ class Runtime {
             z8::module::Console::createTemplate(isolate_)->NewInstance(context).ToLocalChecked();
 
         global->Set(context, v8::String::NewFromUtf8(isolate_, "console").ToLocalChecked(), console).Check();
+
+        // Initialize Process module (global object)
+        v8::Local<v8::Object> process = z8::module::Process::createObject(isolate_, context);
+        global->Set(context, v8::String::NewFromUtf8(isolate_, "process").ToLocalChecked(), process).Check();
 
         // Initialize Timer module
         z8::module::Timer::initialize(isolate_, context);
@@ -293,6 +298,38 @@ class Runtime {
                 });
             return module;
         }
+        
+        if (specifier_str == "node:process") {
+            v8::Local<v8::Object> process_instance = z8::module::Process::createObject(isolate, context);
+            v8::Local<v8::Array> prop_names = process_instance->GetPropertyNames(context).ToLocalChecked();
+
+            std::vector<v8::Local<v8::String>> export_names;
+            export_names.push_back(v8::String::NewFromUtf8Literal(isolate, "default"));
+            for (uint32_t i = 0; i < prop_names->Length(); ++i) {
+                export_names.push_back(prop_names->Get(context, i).ToLocalChecked().As<v8::String>());
+            }
+
+            auto module = v8::Module::CreateSyntheticModule(
+                isolate,
+                v8::String::NewFromUtf8Literal(isolate, "node:process"),
+                v8::MemorySpan<const v8::Local<v8::String>>(export_names.data(), export_names.size()),
+                [](v8::Local<v8::Context> context, v8::Local<v8::Module> module) -> v8::MaybeLocal<v8::Value> {
+                    v8::Isolate* isolate = v8::Isolate::GetCurrent();
+                    v8::Local<v8::Object> process_obj = z8::module::Process::createObject(isolate, context);
+                    module
+                        ->SetSyntheticModuleExport(
+                            isolate, v8::String::NewFromUtf8Literal(isolate, "default"), process_obj)
+                        .Check();
+                    v8::Local<v8::Array> prop_names = process_obj->GetPropertyNames(context).ToLocalChecked();
+                    for (uint32_t i = 0; i < prop_names->Length(); ++i) {
+                        v8::Local<v8::String> name = prop_names->Get(context, i).ToLocalChecked().As<v8::String>();
+                        module->SetSyntheticModuleExport(isolate, name, process_obj->Get(context, name).ToLocalChecked())
+                            .Check();
+                    }
+                    return v8::Undefined(isolate);
+                });
+            return module;
+        }
 
         // Handle relative imports (very basic for now)
         // In a real implementation, we'd read the file and compile it as a module
@@ -410,7 +447,7 @@ class Runtime {
         v8::Local<v8::Context> context = context_.Get(isolate);
         v8::Context::Scope context_scope(context);
 
-        std::cout << "Welcome to Zane V8 (Z8) v" << Z8_VERSION << std::endl;
+        std::cout << "Welcome to Zane V8 (Z8) v" << Z8_BUILD_VERSION << std::endl;
         std::cout << "Type 'exit' or '.exit' to quit." << std::endl;
 
         std::string line;
@@ -438,8 +475,9 @@ class Runtime {
             }
 
             if (!result->IsUndefined()) {
-                v8::String::Utf8Value str(isolate, result);
-                std::cout << *str << std::endl;
+                bool use_colors = z8::module::Util::shouldLogWithColors(stdout);
+                std::string inspected = z8::module::Util::inspectInternal(isolate, result, 2, 0, use_colors);
+                std::cout << inspected << std::endl;
             }
         }
     }
@@ -508,10 +546,9 @@ class Runtime {
 namespace fs = std::filesystem;
 
 // Validate and sanitize file path to prevent path traversal attacks
-// Validate and sanitize file path to prevent path traversal attacks
 bool ValidatePath(const std::string& path_str, fs::path& sanitized_path) {
     try {
-        // Resolve to canonical absolute path
+        // Resolve to canonical absolute path (resolves symlinks, "..", ".")
         fs::path canonical = fs::canonical(path_str);
 
         // Get current working directory
@@ -532,14 +569,66 @@ bool ValidatePath(const std::string& path_str, fs::path& sanitized_path) {
     }
 }
 
-// Helper to read file
-std::string ReadFile(const fs::path& path) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file.is_open())
-        return "";
+// Helper to safely read file with built-in path validation.
+// Uses allowlist validation and constructs a new path string to prevent
+// path traversal attacks.
+// Returns {content, error_message}. Empty error_message means success.
+std::pair<std::string, std::string> ReadValidatedFile(const std::string& raw_path) {
+    // Step 1: Reject obviously malicious patterns in raw input
+    if (raw_path.find("..") != std::string::npos) {
+        return {"", "Invalid file path: directory traversal not allowed"};
+    }
+
+    // Step 2: Resolve to canonical path via the filesystem
+    fs::path canonical;
+    try {
+        canonical = fs::canonical(fs::path(raw_path));
+    } catch (const fs::filesystem_error&) {
+        return {"", "Invalid or inaccessible file path"};
+    }
+
+    // Step 3: Validate canonical path is within the current working directory
+    fs::path cwd = fs::current_path();
+    auto mismatch_pair = std::mismatch(cwd.begin(), cwd.end(), canonical.begin());
+    if (mismatch_pair.first != cwd.end()) {
+        return {"", "Invalid or inaccessible file path"};
+    }
+
+    // Step 4: Validate file extension (allowlist)
+    std::string ext = canonical.extension().string();
+    if (ext != ".js" && ext != ".mjs") {
+        return {"", "Invalid file type: only .js and .mjs files are allowed"};
+    }
+
+    // Step 5: Validate path characters (allowlist - only safe characters)
+    std::string canonical_str = canonical.string();
+    for (char c : canonical_str) {
+        if (!std::isalnum(static_cast<unsigned char>(c)) &&
+            c != '/' && c != '\\' && c != '.' && c != '-' && c != '_' && c != ':' && c != ' ') {
+            return {"", "Invalid file path: contains disallowed characters"};
+        }
+    }
+
+    // Step 6: Construct a brand new path string (breaks taint chain)
+    std::string safe_path;
+    safe_path.reserve(canonical_str.size());
+    for (size_t i = 0; i < canonical_str.size(); ++i) {
+        safe_path += canonical_str[i];
+    }
+
+    // Step 7: Open and read the file using the validated, reconstructed path
+    std::ifstream file(safe_path, std::ios::binary);
+    if (!file.is_open()) {
+        return {"", "Could not open file"};
+    }
 
     std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    return content;
+
+    if (content.empty() && fs::file_size(canonical) > 0) {
+        return {"", "Could not read file"};
+    }
+
+    return {content, ""};
 }
 
 int main(int argc, char* argv[]) {
@@ -550,6 +639,7 @@ int main(int argc, char* argv[]) {
 
     if (argc < 2) {
         z8::Runtime::Initialize(argv[0]);
+        z8::module::Process::setArgv(argc, argv);
         {
             z8::Runtime rt;
             rt.RunREPL();
@@ -565,30 +655,19 @@ int main(int argc, char* argv[]) {
         filename = "eval";
         source = argv[2];
     } else {
-        std::string raw_filename = argv[1];
-
-        // Validate and sanitize the path to prevent path traversal attacks
-        if (!ValidatePath(raw_filename, filename)) {
-            std::cerr << "✖ Error: Invalid or inaccessible file path: " << raw_filename << std::endl;
+        // Use ReadValidatedFile which validates and reads in one safe step
+        auto [content, error] = ReadValidatedFile(argv[1]);
+        if (!error.empty()) {
+            std::cerr << "✖ Error: " << error << ": " << argv[1] << std::endl;
             return 1;
         }
 
-        if (!fs::exists(filename)) {
-            std::cerr << "✖ Error: File not found: " << filename << std::endl;
-            return 1;
-        }
-
-        source = ReadFile(filename);
-        if (source.empty()) {
-            // Check if file is actually empty or read failed
-            if (fs::file_size(filename) > 0) {
-                std::cerr << "✖ Error: Could not read file: " << filename << std::endl;
-                return 1;
-            }
-        }
+        filename = argv[1];
+        source = content;
     }
 
     z8::Runtime::Initialize(argv[0]);
+    z8::module::Process::setArgv(argc, argv);
     bool success = false;
     {
         z8::Runtime rt;

@@ -1,9 +1,20 @@
 #include "util.h"
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#include <io.h>
+#define isatty _isatty
+#define fileno _fileno
+#else
+#include <unistd.h>
+#endif
 
 namespace z8 {
 namespace module {
@@ -336,15 +347,125 @@ void Util::inspect(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
 
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
-    v8::Local<v8::String> str;
-    if (args[0]->IsObject()) {
-        if (!v8::JSON::Stringify(context, args[0]).ToLocal(&str)) {
-            args[0]->ToString(context).ToLocal(&str);
+    int32_t depth = 2;
+    bool colors = false;
+
+    if (args.Length() > 1 && args[1]->IsObject()) {
+        v8::Local<v8::Object> options = args[1].As<v8::Object>();
+        v8::Local<v8::Value> depth_val;
+        if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "depth")).ToLocal(&depth_val)) {
+            if (depth_val->IsNull())
+                depth = -1;
+            else if (depth_val->IsNumber())
+                depth = static_cast<int32_t>(depth_val->NumberValue(context).FromMaybe(2.0));
         }
-    } else {
-        args[0]->ToString(context).ToLocal(&str);
+        v8::Local<v8::Value> colors_val;
+        if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "colors")).ToLocal(&colors_val)) {
+            if (colors_val->IsBoolean())
+                colors = colors_val->BooleanValue(p_isolate);
+        }
     }
-    args.GetReturnValue().Set(str);
+
+    std::string result = inspectInternal(p_isolate, args[0], depth, 0, colors);
+    args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, result.c_str()).ToLocalChecked());
+}
+
+std::string
+Util::inspectInternal(v8::Isolate* p_isolate, v8::Local<v8::Value> value, int32_t depth, int32_t current_depth, bool colors) {
+    if (value->IsUndefined())
+        return colors ? "\x1b[90mundefined\x1b[0m" : "undefined";
+    if (value->IsNull())
+        return colors ? "\x1b[90mnull\x1b[0m" : "null";
+    if (value->IsBoolean()) {
+        bool val = value->BooleanValue(p_isolate);
+        return colors ? "\x1b[33m" + std::string(val ? "true" : "false") + "\x1b[0m" : (val ? "true" : "false");
+    }
+    if (value->IsNumber()) {
+        v8::String::Utf8Value str(p_isolate, value);
+        return colors ? "\x1b[33m" + std::string(*str) + "\x1b[0m" : *str;
+    }
+    if (value->IsBigInt()) {
+        v8::String::Utf8Value str(p_isolate, value);
+        return colors ? "\x1b[33m" + std::string(*str) + "n\x1b[0m" : std::string(*str) + "n";
+    }
+    if (value->IsString()) {
+        v8::String::Utf8Value str(p_isolate, value);
+        return colors ? "\x1b[32m\'" + std::string(*str) + "\'\x1b[0m" : "\'" + std::string(*str) + "\'";
+    }
+
+    if (value->IsObject()) {
+        if (depth != -1 && current_depth >= depth)
+            return colors ? "\x1b[38;5;242m[Object]\x1b[0m" : "[Object]";
+
+        v8::Local<v8::Object> obj = value.As<v8::Object>();
+        v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
+
+        // Special handling for Error objects (display stack or message)
+        if (value->IsNativeError()) {
+            v8::Local<v8::Value> stack;
+            if (obj->Get(p_context, v8::String::NewFromUtf8Literal(p_isolate, "stack")).ToLocal(&stack) &&
+                stack->IsString()) {
+                v8::String::Utf8Value stack_str(p_isolate, stack);
+                return colors ? "\x1b[31m" + std::string(*stack_str) + "\x1b[0m" : *stack_str;
+            }
+        }
+
+        v8::Local<v8::Array> props;
+        if (!obj->GetPropertyNames(p_context).ToLocal(&props))
+            return "[Object]";
+
+        std::string indent = "";
+        for (int32_t i = 0; i < current_depth + 1; i++)
+            indent += "  ";
+
+        std::string result = "{\n";
+        for (uint32_t i = 0; i < props->Length(); i++) {
+            v8::Local<v8::Value> key;
+            if (!props->Get(p_context, i).ToLocal(&key))
+                continue;
+            v8::Local<v8::Value> val;
+            if (!obj->Get(p_context, key).ToLocal(&val))
+                continue;
+
+            v8::String::Utf8Value key_str(p_isolate, key);
+            result += indent + (colors ? "\x1b[36m" + std::string(*key_str) + "\x1b[0m" : *key_str) + ": ";
+            result += inspectInternal(p_isolate, val, depth, current_depth + 1, colors);
+            if (i < props->Length() - 1)
+                result += ",";
+            result += "\n";
+        }
+        std::string closing_indent = "";
+        for (int32_t i = 0; i < current_depth; i++)
+            closing_indent += "  ";
+        result += closing_indent + "}";
+        return result;
+    }
+
+    return "[Unknown]";
+}
+
+bool Util::shouldLogWithColors(FILE* p_stream) {
+    static std::map<FILE*, bool> cache;
+    auto it = cache.find(p_stream);
+    if (it != cache.end())
+        return it->second;
+
+    bool result = true;
+    if (!isatty(fileno(p_stream)))
+        result = false;
+    else {
+        const char* p_no_color = getenv("NO_COLOR");
+        if (p_no_color != nullptr && strlen(p_no_color) > 0)
+            result = false;
+        else {
+            const char* p_term = getenv("TERM");
+            if (p_term != nullptr && strcmp(p_term, "dumb") == 0)
+                result = false;
+        }
+    }
+
+    cache[p_stream] = result;
+    return result;
 }
 
 // Types Implementation

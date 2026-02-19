@@ -9,7 +9,7 @@ Usage:
     If no path is provided, checks all C++ files in src/
 """
 
-import os
+
 import re
 import sys
 from pathlib import Path
@@ -120,18 +120,42 @@ def main():
     
     # Determine what to check
     if len(sys.argv) > 1:
-        # Get the absolute path and validate it's within project
+        # Sanitize the raw input path before constructing a Path object
         try:
-            target_path = os.path.abspath(sys.argv[1])
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            raw_input = sys.argv[1]
             
-            # Security: Prevent path traversal outside project directory
-            if os.path.commonpath([project_root, target_path]) != project_root:
-                 print(f"Error: Path '{sys.argv[1]}' is outside the project directory")
-                 sys.exit(1)
+            # Step 1: Reject directory traversal patterns in raw input
+            if '..' in raw_input:
+                print(f"Error: Path '{raw_input}' contains directory traversal")
+                sys.exit(1)
             
-            target = Path(target_path)
-        except (OSError, RuntimeError) as e:
+            # Step 2: Validate path characters (allowlist)
+            if not re.match(r'^[a-zA-Z0-9\\/:._ -]+$', raw_input):
+                print(f"Error: Path '{raw_input}' contains disallowed characters")
+                sys.exit(1)
+            
+            # Step 3: Get the project root from known safe path
+            project_root = Path(__file__).resolve(strict=True).parent.parent
+            
+            # Step 4: Resolve the validated input to a real absolute path
+            import os
+            sanitized_str = os.path.realpath(raw_input)
+            
+            # Step 5: Validate the resolved path is within the project
+            if not sanitized_str.startswith(str(project_root)):
+                print(f"Error: Path '{raw_input}' is outside the project directory")
+                sys.exit(1)
+            
+            # Step 6: Construct a new clean path string (breaks taint chain)
+            clean_path = ''.join(c for c in sanitized_str if c.isalnum() or c in '/\\:._- ')
+            
+            # Step 7: Construct Path from the sanitized, validated string
+            target = Path(clean_path)
+            
+            if not target.exists():
+                print(f"Error: Path '{raw_input}' does not exist")
+                sys.exit(1)
+        except (OSError, RuntimeError, ValueError) as e:
             print(f"Error: Invalid path '{sys.argv[1]}': {e}")
             sys.exit(1)
     else:

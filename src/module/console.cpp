@@ -1,4 +1,5 @@
 #include "console.h"
+#include "node/util/util.h"
 #include <string.h>
 #ifdef _WIN32
 #include <io.h>
@@ -33,29 +34,7 @@ static void HandleCrash(int32_t sig) {
 
 int32_t Console::m_indentation_level = 0;
 
-bool ShouldUseColors(FILE* p_stream) {
-    static std::map<FILE*, bool> cache;
-    auto it = cache.find(p_stream);
-    if (it != cache.end())
-        return it->second;
-
-    bool result = true;
-    if (!isatty(fileno(p_stream)))
-        result = false;
-    else {
-        const char* p_no_color = getenv("NO_COLOR");
-        if (p_no_color != nullptr && strlen(p_no_color) > 0)
-            result = false;
-        else {
-            const char* p_term = getenv("TERM");
-            if (p_term != nullptr && strcmp(p_term, "dumb") == 0)
-                result = false;
-        }
-    }
-
-    cache[p_stream] = result;
-    return result;
-}
+// redundant functions removed
 
 v8::Local<v8::ObjectTemplate> Console::createTemplate(v8::Isolate* p_isolate) {
     static bool buffered = []() {
@@ -136,7 +115,7 @@ void Console::assert_(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::HandleScope handle_scope(p_isolate);
     FILE* p_out = stderr;
-    bool use_color = ShouldUseColors(p_out);
+    bool use_color = Util::shouldLogWithColors(p_out);
 
     if (use_color)
         fputs("\x1b[31m", p_out);
@@ -209,75 +188,7 @@ void Console::countReset(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 }
 
-static std::string
-Inspect(v8::Isolate* p_isolate, v8::Local<v8::Value> value, int32_t depth, int32_t current_depth, bool colors) {
-    if (value->IsUndefined())
-        return colors ? "\x1b[90mundefined\x1b[0m" : "undefined";
-    if (value->IsNull())
-        return colors ? "\x1b[90mnull\x1b[0m" : "null";
-    if (value->IsBoolean()) {
-        bool val = value->BooleanValue(p_isolate);
-        return colors ? "\x1b[33m" + std::string(val ? "true" : "false") + "\x1b[0m" : (val ? "true" : "false");
-    }
-    if (value->IsNumber()) {
-        v8::String::Utf8Value str(p_isolate, value);
-        return colors ? "\x1b[33m" + std::string(*str) + "\x1b[0m" : *str;
-    }
-    if (value->IsString()) {
-        v8::String::Utf8Value str(p_isolate, value);
-        return colors ? "\x1b[32m\"" + std::string(*str) + "\"\x1b[0m" : "\"" + std::string(*str) + "\"";
-    }
-
-    if (value->IsObject()) {
-        if (depth != -1 && current_depth >= depth)
-            return colors ? "\x1b[38;5;242m[Object]\x1b[0m" : "[Object]";
-
-        v8::Local<v8::Object> obj = value.As<v8::Object>();
-        v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
-
-        // Special handling for Error objects (display stack or message)
-        if (value->IsNativeError()) {
-            v8::Local<v8::Value> stack;
-            if (obj->Get(p_context, v8::String::NewFromUtf8Literal(p_isolate, "stack")).ToLocal(&stack) &&
-                stack->IsString()) {
-                v8::String::Utf8Value stack_str(p_isolate, stack);
-                return colors ? "\x1b[31m" + std::string(*stack_str) + "\x1b[0m" : *stack_str;
-            }
-        }
-
-        v8::Local<v8::Array> props;
-        if (!obj->GetPropertyNames(p_context).ToLocal(&props))
-            return "[Object]";
-
-        std::string indent = "";
-        for (int32_t i = 0; i < current_depth + 1; i++)
-            indent += "  ";
-
-        std::string result = "{\n";
-        for (uint32_t i = 0; i < props->Length(); i++) {
-            v8::Local<v8::Value> key;
-            if (!props->Get(p_context, i).ToLocal(&key))
-                continue;
-            v8::Local<v8::Value> val;
-            if (!obj->Get(p_context, key).ToLocal(&val))
-                continue;
-
-            v8::String::Utf8Value key_str(p_isolate, key);
-            result += indent + (colors ? "\x1b[36m" + std::string(*key_str) + "\x1b[0m" : *key_str) + ": ";
-            result += Inspect(p_isolate, val, depth, current_depth + 1, colors);
-            if (i < props->Length() - 1)
-                result += ",";
-            result += "\n";
-        }
-        std::string closing_indent = "";
-        for (int32_t i = 0; i < current_depth; i++)
-            closing_indent += "  ";
-        result += closing_indent + "}";
-        return result;
-    }
-
-    return "[Unknown]";
-}
+// redundant Inspect removed
 
 void Console::dir(const v8::FunctionCallbackInfo<v8::Value>& args) {
     if (args.Length() == 0)
@@ -287,7 +198,7 @@ void Console::dir(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
 
     int32_t depth = 2;
-    bool colors = ShouldUseColors(stdout);
+    bool colors = Util::shouldLogWithColors(stdout);
 
     if (args.Length() > 1 && args[1]->IsObject()) {
         v8::Local<v8::Object> options = args[1].As<v8::Object>();
@@ -306,7 +217,7 @@ void Console::dir(const v8::FunctionCallbackInfo<v8::Value>& args) {
         }
     }
 
-    std::string result = Inspect(p_isolate, args[0], depth, 0, colors) + "\n";
+    std::string result = Util::inspectInternal(p_isolate, args[0], depth, 0, colors) + "\n";
     FILE* p_out = stdout;
 
     // Apply indentation to each line of the result
@@ -480,8 +391,8 @@ void Console::write(const v8::FunctionCallbackInfo<v8::Value>& args, const char*
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::HandleScope handle_scope(p_isolate);
     FILE* p_out = is_error ? stderr : stdout;
-    bool use_color = p_color_code && ShouldUseColors(p_out);
-    bool global_colors = ShouldUseColors(p_out);
+    bool use_color = p_color_code && Util::shouldLogWithColors(p_out);
+    bool global_colors = Util::shouldLogWithColors(p_out);
 
     // Apply indentation
     for (int32_t i = 0; i < m_indentation_level; i++)
@@ -494,7 +405,7 @@ void Console::write(const v8::FunctionCallbackInfo<v8::Value>& args, const char*
         if (args[i]->IsObject() && !args[i]->IsString() && !args[i]->IsNumber() && !args[i]->IsBoolean() &&
             !args[i]->IsNull()) {
             // Smart inspection for console.log: default depth 2 (like Node)
-            std::string inspected = Inspect(p_isolate, args[i], 2, 0, global_colors);
+            std::string inspected = Util::inspectInternal(p_isolate, args[i], 2, 0, global_colors);
             fwrite(inspected.c_str(), 1, inspected.length(), p_out);
         } else {
             v8::String::Utf8Value utf8(p_isolate, args[i]);
