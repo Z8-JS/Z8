@@ -26,9 +26,46 @@ Returns a string identifying the operating system platform.
 - `'linux'`
 - `'darwin'`
 
+### `process.arch`
+
+Returns the operating system CPU architecture for which the Z8 binary was compiled.
+
+- `'x64'`
+- `'ia32'`
+- `'arm64'`
+- `'arm'`
+
 ### `process.version`
 
 The `process.version` property returns the Z8 version string.
+
+### `process.versions`
+
+Returns an object listing the version strings of Z8 and its dependencies (like V8).
+
+### `process.execPath`
+
+Returns the absolute pathname of the executable that started the process.
+
+### `process.pid`
+
+Returns the PID of the process.
+
+### `process.argv`
+
+An array containing the command-line arguments passed when the Z8 process was launched.
+
+### `process.argv0`
+
+Contains a read-only copy of the original value of `argv[0]` passed when Z8 was launched.
+
+### `process.title`
+
+The `process.title` property returns or sets the current process title (the name displayed in process managers).
+
+### `process.stdout.isTTY` / `process.stderr.isTTY` / `process.stdin.isTTY`
+
+Returns `true` if the stream is connected to a TTY (terminal).
 
 ## Methods
 
@@ -36,22 +73,46 @@ The `process.version` property returns the Z8 version string.
 
 Returns the current working directory of the process.
 
-```js
-console.log(`Current directory: ${process.cwd()}`);
-```
+### `process.chdir(directory)`
+
+Changes the current working directory of the Node.js process.
 
 ### `process.exit([code])`
 
-Terminates the process synchronously with an exit status of `code`. If omitted, exit uses either the 'success' code `0`.
-
-```js
-process.exit(1);
-```
+Terminate the process synchronously with an exit status of `code`. If omitted, exit uses either the 'success' code `0`.
 
 ### `process.uptime()`
 
 Returns the number of seconds the current process has been running.
 
-```js
-console.log(`Uptime: ${process.uptime()}s`);
-```
+### `process.hrtime([time])`
+
+Returns the current high-resolution real time in a `[seconds, nanoseconds]` tuple `Array`.
+
+### `process.hrtime.bigint()`
+
+Returns the current high-resolution real time in nanoseconds as a `BigInt`.
+
+### `process.kill(pid[, signal])`
+
+Sends a signal to a process.
+
+### `process.memoryUsage()`
+
+Returns an object describing the memory usage of the Z8 process.
+
+### `process.cpuUsage([previousValue])`
+
+Returns an object with the user and system CPU time usage of the current process, in microseconds.
+
+### `process.resourceUsage()`
+
+Returns an object describing the resource usage of the current process.
+
+### `process.umask([mask])`
+
+Sets or returns the Node.js process's file mode creation mask.
+
+### `process.nextTick(callback[, ...args])`
+
+Adds `callback` to the "next tick queue". This queue is fully processed after the current operation on the JavaScript stack runs to completion and before the event loop is allowed to continue. (Implemented using V8 microtasks).
