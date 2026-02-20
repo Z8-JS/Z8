@@ -3,8 +3,8 @@
 #include <string.h>
 #ifdef _WIN32
 #include <io.h>
-#define isatty _isatty
-#define fileno _fileno
+#define ISATTY _isatty
+#define FILENO _fileno
 #else
 #include <unistd.h>
 #endif
@@ -442,7 +442,7 @@ void Console::adaptiveFlush(FILE* p_out) {
 
     // Low latency mode: flush immediately during bursts
     // High throughput mode: let the 64KB buffer handle it
-    if (calls_in_burst < 20 && isatty(fileno(p_out))) {
+    if (calls_in_burst < 20 && ISATTY(FILENO(p_out))) {
         if (p_out == stderr)
             fflush(stdout); // Always push stdout before stderr
         fflush(p_out);

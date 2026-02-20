@@ -25,7 +25,7 @@ static std::string generate_random_string(size_t len) {
 }
 #include <windows.h>
 
-static int64_t pread(int32_t fd, void* p_buf, size_t count, int64_t offset) {
+static int64_t fs_pread(int32_t fd, void* p_buf, size_t count, int64_t offset) {
     HANDLE h = (HANDLE) _get_osfhandle(fd);
     if (h == INVALID_HANDLE_VALUE)
         return -1;
@@ -40,7 +40,7 @@ static int64_t pread(int32_t fd, void* p_buf, size_t count, int64_t offset) {
     return -1;
 }
 
-static int64_t pwrite(int32_t fd, const void* p_buf, size_t count, int64_t offset) {
+static int64_t fs_pwrite(int32_t fd, const void* p_buf, size_t count, int64_t offset) {
     HANDLE h = (HANDLE) _get_osfhandle(fd);
     if (h == INVALID_HANDLE_VALUE)
         return -1;
@@ -111,11 +111,11 @@ static inline bool isPathSafe(const char* p_path) {
         return false;
 
     // Use SIMD-optimized strchr to jump directly to dots
-    const char* p = strchr(p_path, '.');
-    while (p) {
-        if (p[1] == '.')
+    const char* p_dot = strchr(p_path, '.');
+    while (p_dot) {
+        if (p_dot[1] == '.')
             return false; // Found ".."
-        p = strchr(p + 1, '.');
+        p_dot = strchr(p_dot + 1, '.');
     }
     return true;
 }
@@ -556,19 +556,19 @@ static void DirRead(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new DirReadCtx();
     p_ctx->p_data = p_data;
 
-    Task* p_task = new Task();
-    p_task->is_promise = is_promise;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_is_promise = is_promise;
     if (is_promise) {
-        p_task->resolver.Reset(p_isolate, p_resolver);
+        p_task->m_resolver.Reset(p_isolate, p_resolver);
     } else {
-        p_task->callback.Reset(p_isolate, p_cb);
+        p_task->m_callback.Reset(p_isolate, p_cb);
     }
 
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<DirReadCtx*>(task->p_data);
-        if (task->is_promise) {
-            auto p_resolver = task->resolver.Get(isolate);
+        if (task->m_is_promise) {
+            auto p_resolver = task->m_resolver.Get(isolate);
             if (p_ctx->m_is_error) {
                 p_resolver
                     ->Reject(context,
@@ -593,7 +593,7 @@ static void DirRead(const v8::FunctionCallbackInfo<v8::Value>& args) {
                 argv[0] = v8::Null(isolate);
                 argv[1] = FS::createDirent(isolate, p_ctx->m_entry);
             }
-            (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+            (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         }
         delete p_ctx;
     };
@@ -639,19 +639,19 @@ static void DirClose(const v8::FunctionCallbackInfo<v8::Value>& args) {
         args.GetReturnValue().Set(p_resolver->GetPromise());
     }
 
-    Task* p_task = new Task();
-    p_task->is_promise = is_promise;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_is_promise = is_promise;
     if (is_promise)
-        p_task->resolver.Reset(p_isolate, p_resolver);
+        p_task->m_resolver.Reset(p_isolate, p_resolver);
     else
-        p_task->callback.Reset(p_isolate, p_cb);
+        p_task->m_callback.Reset(p_isolate, p_cb);
 
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
-        if (task->is_promise) {
-            task->resolver.Get(isolate)->Resolve(context, v8::Undefined(isolate)).Check();
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+        if (task->m_is_promise) {
+            task->m_resolver.Get(isolate)->Resolve(context, v8::Undefined(isolate)).Check();
         } else {
             v8::Local<v8::Value> argv[1] = {v8::Null(isolate)};
-            (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+            (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         }
     };
 
@@ -985,18 +985,18 @@ void FS::readdirSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     std::error_code ec;
 
-    bool withFileTypes = false;
+    bool with_file_types = false;
     if (args.Length() >= 2 && args[1]->IsObject()) {
         v8::Local<v8::Object> options = args[1].As<v8::Object>();
         v8::Local<v8::Value> wft;
         if (options->Get(p_context, v8::String::NewFromUtf8Literal(p_isolate, "withFileTypes")).ToLocal(&wft)) {
-            withFileTypes = wft->BooleanValue(p_isolate);
+            with_file_types = wft->BooleanValue(p_isolate);
         }
     }
 
     std::vector<v8::Local<v8::Value>> entries;
     for (const auto& entry : fs::directory_iterator(*path_val, ec)) {
-        if (withFileTypes) {
+        if (with_file_types) {
             entries.push_back(FS::createDirent(p_isolate, entry));
         } else {
             entries.push_back(
@@ -1676,7 +1676,7 @@ void FS::readvSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
         v8::Local<v8::Value> buf_val;
         if (buffers->Get(p_context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
             v8::Local<v8::Uint8Array> ui8 = buf_val.As<v8::Uint8Array>();
-            char* data = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+            char* p_data = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
             size_t len = ui8->ByteLength();
 
             int32_t read_bytes;
@@ -1684,12 +1684,12 @@ void FS::readvSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
             if (position != -1) {
                 _lseeki64(fd, position + total_read, SEEK_SET);
             }
-            read_bytes = _read(fd, data, static_cast<uint32_t>(len));
+            read_bytes = _read(fd, p_data, static_cast<uint32_t>(len));
 #else
             if (position != -1) {
-                read_bytes = pread(fd, data, len, position + total_read);
+                read_bytes = pread(fd, p_data, len, position + total_read);
             } else {
-                read_bytes = read(fd, data, len);
+                read_bytes = read(fd, p_data, len);
             }
 #endif
             if (read_bytes < 0)
@@ -1724,7 +1724,7 @@ void FS::writevSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
         v8::Local<v8::Value> buf_val;
         if (buffers->Get(p_context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
             v8::Local<v8::Uint8Array> ui8 = buf_val.As<v8::Uint8Array>();
-            const char* data = static_cast<const char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+            const char* p_data = static_cast<const char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
             size_t len = ui8->ByteLength();
 
             int32_t written;
@@ -1732,12 +1732,12 @@ void FS::writevSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
             if (position != -1) {
                 _lseeki64(fd, position + total_written, SEEK_SET);
             }
-            written = _write(fd, data, static_cast<uint32_t>(len));
+            written = _write(fd, p_data, static_cast<uint32_t>(len));
 #else
             if (position != -1) {
-                written = pwrite(fd, data, len, position + total_written);
+                written = pwrite(fd, p_data, len, position + total_written);
             } else {
-                written = write(fd, data, len);
+                written = write(fd, p_data, len);
             }
 #endif
             if (written == -1)
@@ -1792,11 +1792,11 @@ void FS::readFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
         }
     }
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ReadFileCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
         if (p_ctx->m_is_error) {
@@ -1817,7 +1817,7 @@ void FS::readFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
                 argv[1] = v8::Uint8Array::New(ab, 0, p_ctx->m_binary_content.size());
             }
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
 
@@ -1875,13 +1875,13 @@ void FS::readFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         }
     }
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ReadFileCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -1962,11 +1962,11 @@ void FS::writeFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
         p_ctx->m_is_binary = true;
     }
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<WriteFileCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -1975,7 +1975,7 @@ void FS::writeFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -2032,13 +2032,13 @@ void FS::writeFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         p_ctx->m_is_binary = true;
     }
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<WriteFileCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -2093,11 +2093,11 @@ void FS::stat(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new StatCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<StatCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
         if (p_ctx->m_is_error) {
@@ -2108,7 +2108,7 @@ void FS::stat(const v8::FunctionCallbackInfo<v8::Value>& args) {
             argv[0] = v8::Null(isolate);
             argv[1] = FS::createStats(isolate, p_ctx->m_path, p_ctx->m_ec, p_ctx->m_follow_symlink);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
 
@@ -2147,13 +2147,13 @@ void FS::statPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new StatCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<StatCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -2202,11 +2202,11 @@ void FS::unlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new UnlinkCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<UnlinkCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -2215,7 +2215,7 @@ void FS::unlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -2255,13 +2255,13 @@ void FS::unlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new UnlinkCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<UnlinkCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -2311,11 +2311,11 @@ void FS::mkdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new MkdirCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<MkdirCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -2324,7 +2324,7 @@ void FS::mkdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -2365,13 +2365,13 @@ void FS::mkdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new MkdirCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<MkdirCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -2433,11 +2433,11 @@ void FS::readdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
         }
     }
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ReaddirCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
         if (p_ctx->m_is_error) {
@@ -2459,7 +2459,7 @@ void FS::readdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
             }
             argv[1] = array;
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
 
@@ -2499,13 +2499,13 @@ void FS::readdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         }
     }
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ReaddirCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -2560,11 +2560,11 @@ void FS::rmdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new RmdirCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<RmdirCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -2573,7 +2573,7 @@ void FS::rmdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -2603,13 +2603,13 @@ void FS::rmdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new RmdirCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<RmdirCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -2654,11 +2654,11 @@ void FS::rename(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_old_path = *old_path;
     p_ctx->m_new_path = *new_path;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<RenameCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -2667,7 +2667,7 @@ void FS::rename(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -2699,13 +2699,13 @@ void FS::renamePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_old_path = *old_path;
     p_ctx->m_new_path = *new_path;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<RenameCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -2755,11 +2755,11 @@ void FS::copyFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
         p_ctx->m_flags = args[2]->Int32Value(p_isolate->GetCurrentContext()).FromMaybe(0);
     }
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<CopyFileCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -2768,7 +2768,7 @@ void FS::copyFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -2809,13 +2809,13 @@ void FS::copyFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         p_ctx->m_flags = args[2]->Int32Value(p_context).FromMaybe(0);
     }
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<CopyFileCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -2861,11 +2861,11 @@ void FS::access(const v8::FunctionCallbackInfo<v8::Value>& args) {
         p_ctx->m_mode = args[1]->Int32Value(p_isolate->GetCurrentContext()).FromMaybe(0);
     }
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<AccessCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -2874,7 +2874,7 @@ void FS::access(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -2907,13 +2907,13 @@ void FS::accessPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         p_ctx->m_mode = args[1]->Int32Value(p_context).FromMaybe(0);
     }
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<AccessCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -2968,11 +2968,11 @@ void FS::appendFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
         p_ctx->m_is_binary = true;
     }
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<AppendFileCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -2981,7 +2981,7 @@ void FS::appendFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -3027,13 +3027,13 @@ void FS::appendFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         p_ctx->m_is_binary = true;
     }
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<AppendFileCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -3081,11 +3081,11 @@ void FS::realpath(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new RealpathCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<RealpathCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
         if (p_ctx->m_is_error) {
@@ -3096,7 +3096,7 @@ void FS::realpath(const v8::FunctionCallbackInfo<v8::Value>& args) {
             argv[0] = v8::Null(isolate);
             argv[1] = v8::String::NewFromUtf8(isolate, p_ctx->m_result.c_str()).ToLocalChecked();
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
 
@@ -3128,13 +3128,13 @@ void FS::realpathPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new RealpathCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<RealpathCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -3182,11 +3182,11 @@ void FS::chmod(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_path = *path;
     p_ctx->m_mode = mode;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ChmodCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -3195,7 +3195,7 @@ void FS::chmod(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -3228,13 +3228,13 @@ void FS::chmodPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_path = *path;
     p_ctx->m_mode = mode;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ChmodCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -3277,11 +3277,11 @@ void FS::readlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new ReadlinkCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ReadlinkCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
         if (p_ctx->m_is_error) {
@@ -3292,7 +3292,7 @@ void FS::readlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
             argv[0] = v8::Null(isolate);
             argv[1] = v8::String::NewFromUtf8(isolate, p_ctx->m_result.c_str()).ToLocalChecked();
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
 
@@ -3324,13 +3324,13 @@ void FS::readlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new ReadlinkCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ReadlinkCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -3378,11 +3378,11 @@ void FS::symlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_target = *target;
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<SymlinkCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -3391,7 +3391,7 @@ void FS::symlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -3424,13 +3424,13 @@ void FS::symlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_target = *target;
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<SymlinkCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -3467,11 +3467,11 @@ void FS::lstat(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_path = *path;
     p_ctx->m_follow_symlink = false;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<StatCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
         if (p_ctx->m_is_error) {
@@ -3482,7 +3482,7 @@ void FS::lstat(const v8::FunctionCallbackInfo<v8::Value>& args) {
             argv[0] = v8::Null(isolate);
             argv[1] = FS::createStats(isolate, p_ctx->m_path, p_ctx->m_ec, p_ctx->m_follow_symlink);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
 
@@ -3512,13 +3512,13 @@ void FS::lstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_path = *path;
     p_ctx->m_follow_symlink = false;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<StatCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -3567,11 +3567,11 @@ void FS::utimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_atime = atime;
     p_ctx->m_mtime = mtime;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<UtimesCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -3580,7 +3580,7 @@ void FS::utimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -3615,13 +3615,13 @@ void FS::utimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_atime = atime;
     p_ctx->m_mtime = mtime;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<UtimesCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -3666,11 +3666,11 @@ void FS::link(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_existing_path = *existing_path;
     p_ctx->m_new_path = *new_path;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<LinkCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -3679,7 +3679,7 @@ void FS::link(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -3712,13 +3712,13 @@ void FS::linkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_existing_path = *existing_path;
     p_ctx->m_new_path = *new_path;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<LinkCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -3772,11 +3772,11 @@ void FS::truncate(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_path = *path;
     p_ctx->m_length = length;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<TruncateCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -3785,7 +3785,7 @@ void FS::truncate(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -3821,13 +3821,13 @@ void FS::truncatePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_path = *path;
     p_ctx->m_length = length;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<TruncateCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -3961,11 +3961,11 @@ void FS::open(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_path = *path;
     p_ctx->m_flags = flags;
     p_ctx->m_mode = mode;
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<OpenCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
         if (p_ctx->m_is_error) {
@@ -3976,7 +3976,7 @@ void FS::open(const v8::FunctionCallbackInfo<v8::Value>& args) {
             argv[0] = v8::Null(isolate);
             argv[1] = v8::Integer::New(isolate, p_ctx->m_result_fd);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
@@ -4010,13 +4010,13 @@ void FS::openPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_path = *path;
     p_ctx->m_flags = flags;
     p_ctx->m_mode = 0666;
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<OpenCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error)
             p_resolver
                 ->Reject(
@@ -4043,7 +4043,7 @@ void FS::openPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 struct RWCtx {
     int32_t m_fd;
-    void* m_buffer_data;
+    void* p_buffer_data;
     size_t m_length;
     int64_t m_position;
     int32_t m_result_count = 0;
@@ -4071,15 +4071,15 @@ void FS::read(const v8::FunctionCallbackInfo<v8::Value>& args) {
         position = static_cast<int64_t>(args[4]->NumberValue(p_context).FromMaybe(-1));
     auto p_ctx = new RWCtx();
     p_ctx->m_fd = fd;
-    p_ctx->m_buffer_data = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset() + offset;
+    p_ctx->p_buffer_data = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset() + offset;
     p_ctx->m_length = length;
     p_ctx->m_position = position;
     p_ctx->m_buffer_keep_alive.Reset(p_isolate, ui8);
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<RWCtx*>(task->p_data);
         v8::Local<v8::Value> argv[3];
         if (p_ctx->m_is_error) {
@@ -4092,18 +4092,18 @@ void FS::read(const v8::FunctionCallbackInfo<v8::Value>& args) {
             argv[1] = v8::Integer::New(isolate, p_ctx->m_result_count);
             argv[2] = p_ctx->m_buffer_keep_alive.Get(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 3, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 3, argv);
         p_ctx->m_buffer_keep_alive.Reset();
         delete p_ctx;
     };
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         if (p_ctx->m_position != -1)
-            p_ctx->m_result_count = pread(p_ctx->m_fd, p_ctx->m_buffer_data, p_ctx->m_length, p_ctx->m_position);
+            p_ctx->m_result_count = fs_pread(p_ctx->m_fd, p_ctx->p_buffer_data, p_ctx->m_length, p_ctx->m_position);
         else {
 #ifdef _WIN32
-            p_ctx->m_result_count = _read(p_ctx->m_fd, p_ctx->m_buffer_data, (unsigned int) p_ctx->m_length);
+            p_ctx->m_result_count = _read(p_ctx->m_fd, p_ctx->p_buffer_data, static_cast<uint32_t>(p_ctx->m_length));
 #else
-            p_ctx->m_result_count = read(p_ctx->m_fd, p_ctx->m_buffer_data, p_ctx->m_length);
+            p_ctx->m_result_count = read(p_ctx->m_fd, p_ctx->p_buffer_data, p_ctx->m_length);
 #endif
         }
         if (p_ctx->m_result_count == -1) {
@@ -4127,23 +4127,23 @@ void FS::write(const v8::FunctionCallbackInfo<v8::Value>& args) {
         v8::String::Utf8Value utf8(p_isolate, args[1]);
         std::string str = *utf8;
         p_ctx->m_length = str.length();
-        p_ctx->m_buffer_data = malloc(p_ctx->m_length);
-        memcpy(p_ctx->m_buffer_data, str.c_str(), p_ctx->m_length);
+        p_ctx->p_buffer_data = malloc(p_ctx->m_length);
+        memcpy(p_ctx->p_buffer_data, str.c_str(), p_ctx->m_length);
         p_ctx->m_position = -1;
     } else if (args[1]->IsUint8Array()) {
         v8::Local<v8::Uint8Array> ui8 = args[1].As<v8::Uint8Array>();
         p_ctx->m_length = ui8->ByteLength();
-        p_ctx->m_buffer_data = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+        p_ctx->p_buffer_data = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
         p_ctx->m_buffer_keep_alive.Reset(p_isolate, ui8);
         p_ctx->m_position = -1;
         if (args.Length() >= 3 && args[2]->IsNumber())
             p_ctx->m_position = static_cast<int64_t>(args[2]->NumberValue(p_context).FromMaybe(-1));
     }
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<RWCtx*>(task->p_data);
         v8::Local<v8::Value> argv[3];
         if (p_ctx->m_is_error) {
@@ -4159,21 +4159,21 @@ void FS::write(const v8::FunctionCallbackInfo<v8::Value>& args) {
             else
                 argv[2] = v8::Undefined(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 3, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 3, argv);
         if (!p_ctx->m_buffer_keep_alive.IsEmpty())
             p_ctx->m_buffer_keep_alive.Reset();
         else
-            free(p_ctx->m_buffer_data);
+            free(p_ctx->p_buffer_data);
         delete p_ctx;
     };
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
         if (p_ctx->m_position != -1)
-            p_ctx->m_result_count = pwrite(p_ctx->m_fd, p_ctx->m_buffer_data, p_ctx->m_length, p_ctx->m_position);
+            p_ctx->m_result_count = fs_pwrite(p_ctx->m_fd, p_ctx->p_buffer_data, p_ctx->m_length, p_ctx->m_position);
         else {
 #ifdef _WIN32
-            p_ctx->m_result_count = _write(p_ctx->m_fd, p_ctx->m_buffer_data, (unsigned int) p_ctx->m_length);
+            p_ctx->m_result_count = _write(p_ctx->m_fd, p_ctx->p_buffer_data, static_cast<uint32_t>(p_ctx->m_length));
 #else
-            p_ctx->m_result_count = write(p_ctx->m_fd, p_ctx->m_buffer_data, p_ctx->m_length);
+            p_ctx->m_result_count = write(p_ctx->m_fd, p_ctx->p_buffer_data, p_ctx->m_length);
 #endif
         }
         if (p_ctx->m_result_count == -1) {
@@ -4196,18 +4196,18 @@ void FS::close(const v8::FunctionCallbackInfo<v8::Value>& args) {
     };
     auto p_ctx = new CloseCtx();
     p_ctx->m_fd = fd;
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<CloseCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error)
             argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, "Close error").ToLocalChecked());
         else
             argv[0] = v8::Null(isolate);
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
@@ -4242,11 +4242,11 @@ void FS::fstat(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     auto p_ctx = new FstatCtx();
     p_ctx->m_fd = fd;
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<FstatCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
         if (p_ctx->m_is_error) {
@@ -4292,7 +4292,7 @@ void FS::fstat(const v8::FunctionCallbackInfo<v8::Value>& args) {
                 .Check();
             argv[1] = p_stats;
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
@@ -4337,13 +4337,13 @@ void FS::fstatPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new FstatCtx();
     p_ctx->m_fd = fd;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<FstatCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -4446,11 +4446,11 @@ void FS::rm(const v8::FunctionCallbackInfo<v8::Value>& args) {
         }
     }
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<RmCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -4459,7 +4459,7 @@ void FS::rm(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -4501,13 +4501,13 @@ void FS::rmPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         }
     }
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<RmCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -4555,11 +4555,11 @@ void FS::cp(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_src = *src;
     p_ctx->m_dest = *dest;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<CopyCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -4568,7 +4568,7 @@ void FS::cp(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -4600,13 +4600,13 @@ void FS::cpPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_src = *src;
     p_ctx->m_dest = *dest;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<CopyCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -4647,11 +4647,11 @@ void FS::fsync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new FsyncCtx();
     p_ctx->m_fd = fd;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<FsyncCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -4660,7 +4660,7 @@ void FS::fsync(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -4696,13 +4696,13 @@ void FS::fsyncPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new FsyncCtx();
     p_ctx->m_fd = fd;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<FsyncCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -4901,12 +4901,12 @@ void FS::mkdtempSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
 #else
         std::vector<char> tmpl(template_str.begin(), template_str.end());
         tmpl.push_back('\0');
-        char* res = mkdtemp(tmpl.data());
-        if (res == nullptr) {
+        char* p_res = mkdtemp(tmpl.data());
+        if (p_res == nullptr) {
             p_isolate->ThrowException(
                 v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "mkdtemp failed")));
         } else {
-            args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, res).ToLocalChecked());
+            args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, p_res).ToLocalChecked());
         }
 #endif
 }
@@ -4934,11 +4934,11 @@ void FS::ftruncate(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_fd = fd;
     p_ctx->m_len = len;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<FtruncateCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -4947,7 +4947,7 @@ void FS::ftruncate(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -4988,13 +4988,13 @@ void FS::ftruncatePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_fd = fd;
     p_ctx->m_len = len;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<FtruncateCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -5047,11 +5047,11 @@ void FS::futimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_atime = atime;
     p_ctx->m_mtime = mtime;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<FutimesCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -5060,7 +5060,7 @@ void FS::futimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -5108,13 +5108,13 @@ void FS::futimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_atime = atime;
     p_ctx->m_mtime = mtime;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<FutimesCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -5168,11 +5168,11 @@ void FS::mkdtemp(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new MkdtempCtx();
     p_ctx->m_prefix = *prefix;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<MkdtempCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
         if (p_ctx->m_is_error) {
@@ -5183,7 +5183,7 @@ void FS::mkdtemp(const v8::FunctionCallbackInfo<v8::Value>& args) {
             argv[0] = v8::Null(isolate);
             argv[1] = v8::String::NewFromUtf8(isolate, p_ctx->m_result.c_str()).ToLocalChecked();
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
 
@@ -5205,12 +5205,12 @@ void FS::mkdtemp(const v8::FunctionCallbackInfo<v8::Value>& args) {
             p_ctx->m_error_msg = "mkdtemp failed";
         }
 #else
-            char* res = mkdtemp(&template_str[0]);
-            if (res == nullptr) {
+            char* p_res = mkdtemp(&template_str[0]);
+            if (p_res == nullptr) {
                 p_ctx->m_is_error = true;
                 p_ctx->m_error_msg = "mkdtemp failed";
             } else {
-                p_ctx->m_result = res;
+                p_ctx->m_result = p_res;
             }
 #endif
         TaskQueue::getInstance().enqueue(p_task);
@@ -5233,13 +5233,13 @@ void FS::mkdtempPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new MkdtempCtx();
     p_ctx->m_prefix = *prefix;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<MkdtempCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -5271,12 +5271,12 @@ void FS::mkdtempPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
             p_ctx->m_error_msg = "mkdtemp failed";
         }
 #else
-            char* res = mkdtemp(&template_str[0]);
-            if (res == nullptr) {
+            char* p_res = mkdtemp(&template_str[0]);
+            if (p_res == nullptr) {
                 p_ctx->m_is_error = true;
                 p_ctx->m_error_msg = "mkdtemp failed";
             } else {
-                p_ctx->m_result = res;
+                p_ctx->m_result = p_res;
             }
 #endif
         TaskQueue::getInstance().enqueue(p_task);
@@ -5361,11 +5361,11 @@ void FS::statfs(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new StatFsCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<StatFsCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
         if (p_ctx->m_is_error) {
@@ -5376,7 +5376,7 @@ void FS::statfs(const v8::FunctionCallbackInfo<v8::Value>& args) {
             argv[0] = v8::Null(isolate);
             argv[1] = createStatFsObject(isolate, p_ctx->m_info);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
 
@@ -5407,13 +5407,13 @@ void FS::statfsPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new StatFsCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<StatFsCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -5449,15 +5449,15 @@ void FS::lutimesSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
 #ifdef _WIN32
     // Windows implementation for lutimes (symbolic link time)
     // We need to open the file with FILE_FLAG_OPEN_REPARSE_POINT to avoid following the link
-    HANDLE hFile = CreateFile(*path,
+    HANDLE p_h_file = CreateFile(*path,
                               FILE_WRITE_ATTRIBUTES,
                               FILE_SHARE_READ | FILE_SHARE_WRITE,
-                              NULL,
+                              nullptr,
                               OPEN_EXISTING,
                               FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
-                              NULL);
+                              nullptr);
 
-    if (hFile == INVALID_HANDLE_VALUE) {
+    if (p_h_file == INVALID_HANDLE_VALUE) {
         p_isolate->ThrowException(
             v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "lutimes failed: Open failed")));
         return;
@@ -5466,9 +5466,9 @@ void FS::lutimesSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     // Convert double (seconds since epoch) to FILETIME
     // 1 second = 10,000,000 intervals of 100ns
     // Epoch difference (1601 to 1970) is 11644473600 seconds
-    const int64_t EPOCH_DIFF = 11644473600LL;
-    int64_t atime_int = static_cast<int64_t>(atime * 10000000) + EPOCH_DIFF * 10000000;
-    int64_t mtime_int = static_cast<int64_t>(mtime * 10000000) + EPOCH_DIFF * 10000000;
+    const int64_t epoch_diff = 11644473600LL;
+    int64_t atime_int = static_cast<int64_t>(atime * 10000000) + epoch_diff * 10000000;
+    int64_t mtime_int = static_cast<int64_t>(mtime * 10000000) + epoch_diff * 10000000;
 
     FILETIME ftAtime, ftMtime;
     ftAtime.dwLowDateTime = (DWORD) atime_int;
@@ -5476,13 +5476,13 @@ void FS::lutimesSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     ftMtime.dwLowDateTime = (DWORD) mtime_int;
     ftMtime.dwHighDateTime = (DWORD) (mtime_int >> 32);
 
-    if (!SetFileTime(hFile, NULL, &ftAtime, &ftMtime)) {
-        CloseHandle(hFile);
+    if (!SetFileTime(p_h_file, nullptr, &ftAtime, &ftMtime)) {
+        CloseHandle(p_h_file);
         p_isolate->ThrowException(
             v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "lutimes failed: SetFileTime failed")));
         return;
     }
-    CloseHandle(hFile);
+    CloseHandle(p_h_file);
 
 #else
         struct timeval tv[2];
@@ -5520,11 +5520,11 @@ void FS::lutimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_atime = atime;
     p_ctx->m_mtime = mtime;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<LutimesCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -5533,37 +5533,37 @@ void FS::lutimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
 #ifdef _WIN32
-        HANDLE hFile = CreateFile(p_ctx->m_path.c_str(),
+        HANDLE p_h_file = CreateFile(p_ctx->m_path.c_str(),
                                   FILE_WRITE_ATTRIBUTES,
                                   FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                  NULL,
+                                  nullptr,
                                   OPEN_EXISTING,
                                   FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
-                                  NULL);
-        if (hFile == INVALID_HANDLE_VALUE) {
+                                  nullptr);
+        if (p_h_file == INVALID_HANDLE_VALUE) {
             p_ctx->m_is_error = true;
             p_ctx->m_error_msg = "lutimes failed: Open failed";
         } else {
-            const int64_t EPOCH_DIFF = 11644473600LL;
-            int64_t atime_int = static_cast<int64_t>(p_ctx->m_atime * 10000000) + EPOCH_DIFF * 10000000;
-            int64_t mtime_int = static_cast<int64_t>(p_ctx->m_mtime * 10000000) + EPOCH_DIFF * 10000000;
+            const int64_t epoch_diff = 11644473600LL;
+            int64_t atime_int = static_cast<int64_t>(p_ctx->m_atime * 10000000) + epoch_diff * 10000000;
+            int64_t mtime_int = static_cast<int64_t>(p_ctx->m_mtime * 10000000) + epoch_diff * 10000000;
             FILETIME ftAtime, ftMtime;
             ftAtime.dwLowDateTime = (DWORD) atime_int;
             ftAtime.dwHighDateTime = (DWORD) (atime_int >> 32);
             ftMtime.dwLowDateTime = (DWORD) mtime_int;
             ftMtime.dwHighDateTime = (DWORD) (mtime_int >> 32);
 
-            if (!SetFileTime(hFile, NULL, &ftAtime, &ftMtime)) {
+            if (!SetFileTime(p_h_file, nullptr, &ftAtime, &ftMtime)) {
                 p_ctx->m_is_error = true;
                 p_ctx->m_error_msg = "lutimes failed: SetFileTime failed";
             }
-            CloseHandle(hFile);
+            CloseHandle(p_h_file);
         }
 
 #else
@@ -5601,13 +5601,13 @@ void FS::lutimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_atime = atime;
     p_ctx->m_mtime = mtime;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<LutimesCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -5622,31 +5622,31 @@ void FS::lutimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
 #ifdef _WIN32
-        HANDLE hFile = CreateFile(p_ctx->m_path.c_str(),
+        HANDLE p_h_file = CreateFile(p_ctx->m_path.c_str(),
                                   FILE_WRITE_ATTRIBUTES,
                                   FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                  NULL,
+                                  nullptr,
                                   OPEN_EXISTING,
                                   FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
-                                  NULL);
-        if (hFile == INVALID_HANDLE_VALUE) {
+                                  nullptr);
+        if (p_h_file == INVALID_HANDLE_VALUE) {
             p_ctx->m_is_error = true;
             p_ctx->m_error_msg = "lutimes failed: Open failed";
         } else {
-            const int64_t EPOCH_DIFF = 11644473600LL;
-            int64_t atime_int = static_cast<int64_t>(p_ctx->m_atime * 10000000) + EPOCH_DIFF * 10000000;
-            int64_t mtime_int = static_cast<int64_t>(p_ctx->m_mtime * 10000000) + EPOCH_DIFF * 10000000;
+            const int64_t epoch_diff = 11644473600LL;
+            int64_t atime_int = static_cast<int64_t>(p_ctx->m_atime * 10000000) + epoch_diff * 10000000;
+            int64_t mtime_int = static_cast<int64_t>(p_ctx->m_mtime * 10000000) + epoch_diff * 10000000;
             FILETIME ftAtime, ftMtime;
             ftAtime.dwLowDateTime = (DWORD) atime_int;
             ftAtime.dwHighDateTime = (DWORD) (atime_int >> 32);
             ftMtime.dwLowDateTime = (DWORD) mtime_int;
             ftMtime.dwHighDateTime = (DWORD) (mtime_int >> 32);
 
-            if (!SetFileTime(hFile, NULL, &ftAtime, &ftMtime)) {
+            if (!SetFileTime(p_h_file, nullptr, &ftAtime, &ftMtime)) {
                 p_ctx->m_is_error = true;
                 p_ctx->m_error_msg = "lutimes failed: SetFileTime failed";
             }
-            CloseHandle(hFile);
+            CloseHandle(p_h_file);
         }
 
 #else
@@ -5690,11 +5690,11 @@ void FS::chown(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_uid = uid;
     p_ctx->m_gid = gid;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ChownCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -5703,7 +5703,7 @@ void FS::chown(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -5736,11 +5736,11 @@ void FS::fchown(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_gid = gid;
     p_ctx->m_is_fd = true;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ChownCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -5749,7 +5749,7 @@ void FS::fchown(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -5782,11 +5782,11 @@ void FS::lchown(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_gid = gid;
     p_ctx->m_is_lchown = true;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ChownCtx*>(task->p_data);
         v8::Local<v8::Value> argv[1];
         if (p_ctx->m_is_error) {
@@ -5795,7 +5795,7 @@ void FS::lchown(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             argv[0] = v8::Null(isolate);
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 1, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 1, argv);
         delete p_ctx;
     };
 
@@ -5832,13 +5832,13 @@ void FS::chownPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_uid = uid;
     p_ctx->m_gid = gid;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ChownCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -5884,13 +5884,13 @@ void FS::fchownPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_gid = gid;
     p_ctx->m_is_fd = true;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ChownCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -5936,13 +5936,13 @@ void FS::lchownPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     p_ctx->m_gid = gid;
     p_ctx->m_is_lchown = true;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ChownCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -5991,16 +5991,16 @@ void FS::opendir(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new OpendirCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<OpendirCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
         argv[0] = v8::Null(isolate);
         argv[1] = FS::createDir(isolate, p_ctx->m_path);
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
 
@@ -6026,13 +6026,13 @@ void FS::opendirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto p_ctx = new OpendirCtx();
     p_ctx->m_path = *path;
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<OpendirCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         p_resolver->Resolve(context, FS::createDir(isolate, p_ctx->m_path)).Check();
         delete p_ctx;
     };
@@ -6078,11 +6078,11 @@ void FS::readv(const v8::FunctionCallbackInfo<v8::Value>& args) {
         }
     }
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ReadVCtx*>(task->p_data);
         v8::Local<v8::Value> argv[3];
         if (p_ctx->m_is_error) {
@@ -6100,13 +6100,13 @@ void FS::readv(const v8::FunctionCallbackInfo<v8::Value>& args) {
                 v8::Local<v8::Value> buf_val;
                 if (buffers->Get(context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
                     v8::Local<v8::Uint8Array> ui8 = buf_val.As<v8::Uint8Array>();
-                    char* dst = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
-                    memcpy(dst, p_ctx->m_results[i].data(), p_ctx->m_results[i].size());
+                    char* p_dst = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+                    memcpy(p_dst, p_ctx->m_results[i].data(), p_ctx->m_results[i].size());
                 }
             }
             argv[2] = buffers;
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 3, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 3, argv);
         p_ctx->m_js_buffers.Reset();
         delete p_ctx;
     };
@@ -6176,17 +6176,17 @@ void FS::writev(const v8::FunctionCallbackInfo<v8::Value>& args) {
         v8::Local<v8::Value> buf_val;
         if (buffers->Get(p_context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
             v8::Local<v8::Uint8Array> ui8 = buf_val.As<v8::Uint8Array>();
-            const char* data = static_cast<const char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+            const char* p_data = static_cast<const char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
             size_t len = ui8->ByteLength();
-            p_ctx->m_buffers.emplace_back(data, data + len);
+            p_ctx->m_buffers.emplace_back(p_data, p_data + len);
         }
     }
 
-    Task* p_task = new Task();
-    p_task->callback.Reset(p_isolate, p_cb);
-    p_task->is_promise = false;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_callback.Reset(p_isolate, p_cb);
+    p_task->m_is_promise = false;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<WriteVCtx*>(task->p_data);
         v8::Local<v8::Value> argv[2];
         if (p_ctx->m_is_error) {
@@ -6197,7 +6197,7 @@ void FS::writev(const v8::FunctionCallbackInfo<v8::Value>& args) {
             argv[0] = v8::Null(isolate);
             argv[1] = v8::Integer::New(isolate, static_cast<int32_t>(p_ctx->m_total_written));
         }
-        (void) task->callback.Get(isolate)->Call(context, context->Global(), 2, argv);
+        (void) task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
 
@@ -6258,13 +6258,13 @@ void FS::readvPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         }
     }
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<ReadVCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(
@@ -6277,8 +6277,8 @@ void FS::readvPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
                 v8::Local<v8::Value> buf_val;
                 if (buffers->Get(context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
                     v8::Local<v8::Uint8Array> ui8 = buf_val.As<v8::Uint8Array>();
-                    char* dst = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
-                    memcpy(dst, p_ctx->m_results[i].data(), p_ctx->m_results[i].size());
+                    char* p_dst = static_cast<char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+                    memcpy(p_dst, p_ctx->m_results[i].data(), p_ctx->m_results[i].size());
                 }
             }
 
@@ -6354,19 +6354,19 @@ void FS::writevPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         v8::Local<v8::Value> buf_val;
         if (buffers->Get(p_context, i).ToLocal(&buf_val) && buf_val->IsUint8Array()) {
             v8::Local<v8::Uint8Array> ui8 = buf_val.As<v8::Uint8Array>();
-            const char* data = static_cast<const char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+            const char* p_data = static_cast<const char*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
             size_t len = ui8->ByteLength();
-            p_ctx->m_buffers.emplace_back(data, data + len);
+            p_ctx->m_buffers.emplace_back(p_data, p_data + len);
         }
     }
 
-    Task* p_task = new Task();
-    p_task->resolver.Reset(p_isolate, p_resolver);
-    p_task->is_promise = true;
+    z8::Task* p_task = new z8::Task();
+    p_task->m_resolver.Reset(p_isolate, p_resolver);
+    p_task->m_is_promise = true;
     p_task->p_data = p_ctx;
-    p_task->runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         auto p_ctx = static_cast<WriteVCtx*>(task->p_data);
-        auto p_resolver = task->resolver.Get(isolate);
+        auto p_resolver = task->m_resolver.Get(isolate);
         if (p_ctx->m_is_error) {
             p_resolver
                 ->Reject(

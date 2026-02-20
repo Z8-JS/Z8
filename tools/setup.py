@@ -31,6 +31,16 @@ DEPENDENCIES = {
         "url": "https://github.com/uNetworking/uSockets/archive/refs/tags/v0.8.8.zip",
         "folder": "uSockets",
         "is_source": True
+    },
+    "brotli": {
+        "url": "https://github.com/google/brotli/archive/refs/tags/v1.2.0.zip",
+        "folder": "brotli",
+        "is_source": True
+    },
+    "zstd": {
+        "url": "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz",
+        "folder": "zstd",
+        "is_source": True
     }
 }
 

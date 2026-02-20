@@ -62,12 +62,16 @@ $cppFlags = @(
     "/O2", "/Oi", "/Ot", "/MT", "/DNDEBUG",
     "/DV8_COMPRESS_POINTERS",
     "/nologo", "/c",
-    "/Iv8/include", "/Isrc"
+    "/Iv8/include", "/Isrc", "/Ideps/zlib", "/Ideps/brotli/c/include"
 )
 
 $linkFlags = @(
     "/OUT:z8.exe", "/SUBSYSTEM:CONSOLE", "/MACHINE:X64", "/NOLOGO",
-    "main.obj", "temporal_shims.obj", "console.obj", "fs.obj", "path.obj", "os.obj", "process.obj", "util.obj", "timer.obj",
+    "main.obj", "temporal_shims.obj", "console.obj", "fs.obj", "path.obj", "os.obj", "process.obj", "util.obj", "timer.obj", "zlib.obj",
+    "adler32.obj", "compress.obj", "crc32.obj", "deflate.obj", "infback.obj", "inffast.obj", "inflate.obj", "inftrees.obj", "trees.obj", "uncompr.obj", "zutil.obj",
+    "constants.obj", "context.obj", "dictionary.obj", "platform.obj", "shared_dictionary.obj", "transform.obj",
+    "bit_reader.obj", "decode.obj", "huffman.obj", "prefix.obj", "state.obj", "static_init_dec.obj",
+    "backward_references.obj", "backward_references_hq.obj", "bit_cost.obj", "block_splitter.obj", "brotli_bit_stream.obj", "cluster.obj", "command.obj", "compound_dictionary.obj", "compress_fragment.obj", "compress_fragment_two_pass.obj", "dictionary_hash.obj", "encode.obj", "encoder_dict.obj", "entropy_encode.obj", "fast_log.obj", "histogram.obj", "literal_cost.obj", "memory.obj", "metablock.obj", "static_dict.obj", "static_dict_lut.obj", "static_init_enc.obj", "utf8_util.obj",
     "V8\out.gn\x64.release\obj\v8_monolith.lib",
     "libcmt.lib", "libcpmt.lib",
     "winmm.lib", "dbghelp.lib", "shlwapi.lib", "user32.lib", "iphlpapi.lib",
@@ -88,13 +92,24 @@ if ($Config -eq "Debug") {
 
 # Step 3: Compile
 Write-Host "[3/4] Compiling C++ source files..."
-$sources = @("src/main.cpp", "src/temporal_shims.cpp", "src/module/console.cpp", "src/module/node/fs/fs.cpp", "src/module/node/path/path.cpp", "src/module/node/os/os.cpp", "src/module/node/process/process.cpp", "src/module/node/util/util.cpp", "src/module/timer.cpp")
+$sources = @("src/main.cpp", "src/temporal_shims.cpp", "src/module/console.cpp", "src/module/node/fs/fs.cpp", "src/module/node/path/path.cpp", "src/module/node/os/os.cpp", "src/module/node/process/process.cpp", "src/module/node/util/util.cpp", "src/module/node/zlib/zlib.cpp", "src/module/timer.cpp")
+$sources += @("deps/zlib/adler32.c", "deps/zlib/compress.c", "deps/zlib/crc32.c", "deps/zlib/deflate.c", "deps/zlib/infback.c", "deps/zlib/inffast.c", "deps/zlib/inflate.c", "deps/zlib/inftrees.c", "deps/zlib/trees.c", "deps/zlib/uncompr.c", "deps/zlib/zutil.c")
+$sources += @("deps/brotli/c/common/constants.c", "deps/brotli/c/common/context.c", "deps/brotli/c/common/dictionary.c", "deps/brotli/c/common/platform.c", "deps/brotli/c/common/shared_dictionary.c", "deps/brotli/c/common/transform.c")
+# dec/static_init.c and enc/static_init.c share the same basename so they must
+# be compiled individually with /Fo to avoid object-name collisions.
+$sources += @("deps/brotli/c/dec/bit_reader.c", "deps/brotli/c/dec/decode.c", "deps/brotli/c/dec/huffman.c", "deps/brotli/c/dec/prefix.c", "deps/brotli/c/dec/state.c")
+$sources += @("deps/brotli/c/enc/backward_references.c", "deps/brotli/c/enc/backward_references_hq.c", "deps/brotli/c/enc/bit_cost.c", "deps/brotli/c/enc/block_splitter.c", "deps/brotli/c/enc/brotli_bit_stream.c", "deps/brotli/c/enc/cluster.c", "deps/brotli/c/enc/command.c", "deps/brotli/c/enc/compound_dictionary.c", "deps/brotli/c/enc/compress_fragment.c", "deps/brotli/c/enc/compress_fragment_two_pass.c", "deps/brotli/c/enc/dictionary_hash.c", "deps/brotli/c/enc/encode.c", "deps/brotli/c/enc/encoder_dict.c", "deps/brotli/c/enc/entropy_encode.c", "deps/brotli/c/enc/fast_log.c", "deps/brotli/c/enc/histogram.c", "deps/brotli/c/enc/literal_cost.c", "deps/brotli/c/enc/memory.c", "deps/brotli/c/enc/metablock.c", "deps/brotli/c/enc/static_dict.c", "deps/brotli/c/enc/static_dict_lut.c", "deps/brotli/c/enc/utf8_util.c")
 & cl.exe $cppFlags $sources
+if ($LASTEXITCODE -ne 0) { Write-Host "Compilation failed!"; exit 1 }
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Compilation failed!"
-    exit 1
-}
+# Compile the two static_init.c files individually with distinct output names
+Write-Host "Compiling brotli static_init files..."
+& cl.exe $cppFlags "/Fostatic_init_dec.obj" "deps/brotli/c/dec/static_init.c"
+if ($LASTEXITCODE -ne 0) { Write-Host "Compilation failed (static_init_dec)!"; exit 1 }
+& cl.exe $cppFlags "/Fostatic_init_enc.obj" "deps/brotli/c/enc/static_init.c"
+if ($LASTEXITCODE -ne 0) { Write-Host "Compilation failed (static_init_enc)!"; exit 1 }
+
+
 
 # Step 4: Link
 Write-Host "[4/4] Linking z8.exe..."

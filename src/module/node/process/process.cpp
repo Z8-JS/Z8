@@ -81,7 +81,7 @@ v8::Local<v8::Object> Process::createObject(v8::Isolate* p_isolate, v8::Local<v8
     obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "env"), createEnvObject(p_isolate, context)).Check();
 
     // Set process.argv
-    v8::Local<v8::Array> argv_arr = v8::Array::New(p_isolate, (int)m_argv.size());
+    v8::Local<v8::Array> argv_arr = v8::Array::New(p_isolate, static_cast<int32_t>(m_argv.size()));
     for (size_t i = 0; i < m_argv.size(); ++i) {
         argv_arr->Set(context, (uint32_t)i, v8::String::NewFromUtf8(p_isolate, m_argv[i].c_str()).ToLocalChecked())
             .Check();
@@ -352,10 +352,10 @@ void Process::kill(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
 #ifdef _WIN32
-    HANDLE process = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
-    if (process != NULL) {
-        TerminateProcess(process, sig);
-        CloseHandle(process);
+    HANDLE p_process = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+    if (p_process != nullptr) {
+        TerminateProcess(p_process, static_cast<uint32_t>(sig));
+        CloseHandle(p_process);
     }
 #else
     ::kill(pid, sig);
@@ -563,7 +563,7 @@ void Process::stdinRead(const v8::FunctionCallbackInfo<v8::Value>& args) {
     char buf[4096];
     size_t n = fread(buf, 1, sizeof(buf), stdin);
     if (n > 0) {
-        args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, buf, v8::NewStringType::kNormal, (int)n).ToLocalChecked());
+        args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, buf, v8::NewStringType::kNormal, static_cast<int32_t>(n)).ToLocalChecked());
     } else {
         args.GetReturnValue().Set(v8::Null(p_isolate));
     }
@@ -590,16 +590,16 @@ v8::Local<v8::Object> Process::createEnvObject(v8::Isolate* p_isolate, v8::Local
 
     // 1. Load system environment variables
 #ifdef _WIN32
-    auto set_env_from_system = [&](const char* name) {
-        char* buf = nullptr;
+    auto set_env_from_system = [&](const char* p_name) {
+        char* p_buf = nullptr;
         size_t sz = 0;
-        if (_dupenv_s(&buf, &sz, name) == 0 && buf != nullptr) {
+        if (_dupenv_s(&p_buf, &sz, p_name) == 0 && p_buf != nullptr) {
             env_obj
                 ->Set(context,
-                      v8::String::NewFromUtf8(p_isolate, name).ToLocalChecked(),
-                      v8::String::NewFromUtf8(p_isolate, buf).ToLocalChecked())
+                      v8::String::NewFromUtf8(p_isolate, p_name).ToLocalChecked(),
+                      v8::String::NewFromUtf8(p_isolate, p_buf).ToLocalChecked())
                 .Check();
-            free(buf);
+            free(p_buf);
         }
     };
 
@@ -610,8 +610,8 @@ v8::Local<v8::Object> Process::createEnvObject(v8::Isolate* p_isolate, v8::Local
     }
 #else
     extern char** environ;
-    for (char** env = environ; *env != nullptr; ++env) {
-        std::string s(*env);
+    for (char** p_env = environ; *p_env != nullptr; ++p_env) {
+        std::string s(*p_env);
         size_t pos = s.find('=');
         if (pos != std::string::npos) {
             std::string key = s.substr(0, pos);
@@ -679,9 +679,13 @@ std::map<std::string, std::string> Process::loadDotEnv() {
 std::string Process::getExecPath() {
 #ifdef _WIN32
     wchar_t buf[MAX_PATH];
-    GetModuleFileNameW(NULL, buf, MAX_PATH);
+    GetModuleFileNameW(nullptr, buf, MAX_PATH);
     std::wstring ws(buf);
-    return std::string(ws.begin(), ws.end());
+    std::string s(ws.length(), ' ');
+    for (size_t i = 0; i < ws.length(); ++i) {
+        s[i] = static_cast<char>(ws[i]);
+    }
+    return s;
 #elif __APPLE__
     char buf[1024];
     uint32_t size = sizeof(buf);

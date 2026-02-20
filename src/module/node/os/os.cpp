@@ -26,49 +26,49 @@ namespace module {
 static std::string wstringToString(const std::wstring& wstr) {
     if (wstr.empty())
         return "";
-    int32_t size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int) wstr.size(), NULL, 0, NULL, NULL);
-    std::string strTo(size_needed, 0);
-    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], (int) wstr.size(), &strTo[0], size_needed, NULL, NULL);
-    return strTo;
+    int32_t size_needed = WideCharToMultiByte(CP_UTF8, 0, &wstr[0], static_cast<int32_t>(wstr.size()), nullptr, 0, nullptr, nullptr);
+    std::string str_to(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, &wstr[0], static_cast<int32_t>(wstr.size()), &str_to[0], size_needed, nullptr, nullptr);
+    return str_to;
 }
 
-static std::string getEnvVar(const char* name) {
-    char* buf = nullptr;
+static std::string getEnvVar(const char* p_name) {
+    char* p_buf = nullptr;
     size_t sz = 0;
-    if (_dupenv_s(&buf, &sz, name) == 0 && buf != nullptr) {
-        std::string res(buf);
-        free(buf);
+    if (_dupenv_s(&p_buf, &sz, p_name) == 0 && p_buf != nullptr) {
+        std::string res(p_buf);
+        free(p_buf);
         return res;
     }
     return "";
 }
 
 static std::string getCPUModel() {
-    HKEY hKey;
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, KEY_READ, &hKey) ==
+    HKEY h_key;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, KEY_READ, &h_key) ==
         ERROR_SUCCESS) {
         char buffer[256];
         DWORD size = sizeof(buffer);
-        if (RegQueryValueExA(hKey, "ProcessorNameString", NULL, NULL, (LPBYTE) buffer, &size) == ERROR_SUCCESS) {
-            RegCloseKey(hKey);
+        if (RegQueryValueExA(h_key, "ProcessorNameString", nullptr, nullptr, (LPBYTE) buffer, &size) == ERROR_SUCCESS) {
+            RegCloseKey(h_key);
             return std::string(buffer);
         }
-        RegCloseKey(hKey);
+        RegCloseKey(h_key);
     }
     return "Unknown CPU";
 }
 
 static uint32_t getCPUSpeed() {
-    HKEY hKey;
-    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, KEY_READ, &hKey) ==
+    HKEY h_key;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, KEY_READ, &h_key) ==
         ERROR_SUCCESS) {
         DWORD speed = 0;
         DWORD size = sizeof(speed);
-        if (RegQueryValueExA(hKey, "~MHz", NULL, NULL, (LPBYTE) &speed, &size) == ERROR_SUCCESS) {
-            RegCloseKey(hKey);
+        if (RegQueryValueExA(h_key, "~MHz", nullptr, nullptr, (LPBYTE) &speed, &size) == ERROR_SUCCESS) {
+            RegCloseKey(h_key);
             return (uint32_t) speed;
         }
-        RegCloseKey(hKey);
+        RegCloseKey(h_key);
     }
     return 0;
 }
@@ -145,23 +145,23 @@ void OS::arch(const v8::FunctionCallbackInfo<v8::Value>& args) {
     SYSTEM_INFO sys_info;
     GetSystemInfo(&sys_info);
 
-    const char* arch_str = "unknown";
+    const char* p_arch_str = "unknown";
     switch (sys_info.wProcessorArchitecture) {
     case PROCESSOR_ARCHITECTURE_AMD64:
-        arch_str = "x64";
+        p_arch_str = "x64";
         break;
     case PROCESSOR_ARCHITECTURE_ARM64:
-        arch_str = "arm64";
+        p_arch_str = "arm64";
         break;
     case PROCESSOR_ARCHITECTURE_INTEL:
-        arch_str = "ia32";
+        p_arch_str = "ia32";
         break;
     case PROCESSOR_ARCHITECTURE_ARM:
-        arch_str = "arm";
+        p_arch_str = "arm";
         break;
     }
 
-    args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, arch_str).ToLocalChecked());
+    args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, p_arch_str).ToLocalChecked());
 }
 
 void OS::cpus(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -257,25 +257,25 @@ void OS::networkInterfaces(const v8::FunctionCallbackInfo<v8::Value>& args) {
     WSAStartup(MAKEWORD(2, 2), &wsaData);
 
     ULONG outBufLen = 15000;
-    PIP_ADAPTER_ADDRESSES pAddresses = (IP_ADAPTER_ADDRESSES*) malloc(outBufLen);
+    PIP_ADAPTER_ADDRESSES p_addresses = (IP_ADAPTER_ADDRESSES*) malloc(outBufLen);
 
-    if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_PREFIX, NULL, pAddresses, &outBufLen) == NO_ERROR) {
-        PIP_ADAPTER_ADDRESSES pCurrAddresses = pAddresses;
-        while (pCurrAddresses) {
-            std::string name = wstringToString(pCurrAddresses->FriendlyName);
+    if (GetAdaptersAddresses(AF_UNSPEC, GAA_FLAG_INCLUDE_PREFIX, nullptr, p_addresses, &outBufLen) == NO_ERROR) {
+        PIP_ADAPTER_ADDRESSES p_curr_addresses = p_addresses;
+        while (p_curr_addresses) {
+            std::string name = wstringToString(p_curr_addresses->FriendlyName);
 
             v8::Local<v8::Array> net_arr = v8::Array::New(p_isolate);
             uint32_t index = 0;
 
-            PIP_ADAPTER_UNICAST_ADDRESS pUnicast = pCurrAddresses->FirstUnicastAddress;
-            while (pUnicast) {
-                sockaddr* sa = pUnicast->Address.lpSockaddr;
+            PIP_ADAPTER_UNICAST_ADDRESS p_unicast = p_curr_addresses->FirstUnicastAddress;
+            while (p_unicast) {
+                sockaddr* p_sa = p_unicast->Address.lpSockaddr;
                 char buf[NI_MAXHOST];
-                int32_t res = getnameinfo(sa,
-                                          (sa->sa_family == AF_INET) ? sizeof(sockaddr_in) : sizeof(sockaddr_in6),
+                int32_t res = getnameinfo(p_sa,
+                                          (p_sa->sa_family == AF_INET) ? sizeof(sockaddr_in) : sizeof(sockaddr_in6),
                                           buf,
                                           sizeof(buf),
-                                          NULL,
+                                          nullptr,
                                           0,
                                           NI_NUMERICHOST);
 
@@ -290,27 +290,27 @@ void OS::networkInterfaces(const v8::FunctionCallbackInfo<v8::Value>& args) {
                     addr_obj
                         ->Set(context,
                               v8::String::NewFromUtf8Literal(p_isolate, "family"),
-                              v8::String::NewFromUtf8Literal(p_isolate, (sa->sa_family == AF_INET) ? "IPv4" : "IPv6"))
+                              v8::String::NewFromUtf8Literal(p_isolate, (p_sa->sa_family == AF_INET) ? "IPv4" : "IPv6"))
                         .Check();
                     addr_obj
                         ->Set(context,
                               v8::String::NewFromUtf8Literal(p_isolate, "internal"),
-                              v8::Boolean::New(p_isolate, pCurrAddresses->IfType == IF_TYPE_SOFTWARE_LOOPBACK))
+                              v8::Boolean::New(p_isolate, p_curr_addresses->IfType == IF_TYPE_SOFTWARE_LOOPBACK))
                         .Check();
 
                     net_arr->Set(context, index++, addr_obj).Check();
                 }
-                pUnicast = pUnicast->Next;
+                p_unicast = p_unicast->Next;
             }
 
             if (index > 0) {
                 result->Set(context, v8::String::NewFromUtf8(p_isolate, name.c_str()).ToLocalChecked(), net_arr)
                     .Check();
             }
-            pCurrAddresses = pCurrAddresses->Next;
+            p_curr_addresses = p_curr_addresses->Next;
         }
     }
-    free(pAddresses);
+    free(p_addresses);
     WSACleanup();
 #endif
 
@@ -326,16 +326,16 @@ void OS::release(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     std::string rel = "Unknown";
 #ifdef _WIN32
-    HMODULE hMod = GetModuleHandleA("ntdll.dll");
-    if (hMod) {
+    HMODULE p_h_mod = GetModuleHandleA("ntdll.dll");
+    if (p_h_mod) {
         typedef NTSTATUS(WINAPI * RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
-        RtlGetVersionPtr fxPtr = (RtlGetVersionPtr) GetProcAddress(hMod, "RtlGetVersion");
-        if (fxPtr != nullptr) {
-            RTL_OSVERSIONINFOW osvi = {0};
-            osvi.dwOSVersionInfoSize = sizeof(osvi);
-            if (fxPtr(&osvi) == 0) {
-                rel = std::to_string(osvi.dwMajorVersion) + "." + std::to_string(osvi.dwMinorVersion) + "." +
-                      std::to_string(osvi.dwBuildNumber);
+        RtlGetVersionPtr p_fx_ptr = (RtlGetVersionPtr) GetProcAddress(p_h_mod, "RtlGetVersion");
+        if (p_fx_ptr != nullptr) {
+            RTL_OSVERSIONINFOW m_osvi = {0};
+            m_osvi.dwOSVersionInfoSize = sizeof(m_osvi);
+            if (p_fx_ptr(&m_osvi) == 0) {
+                rel = std::to_string(m_osvi.dwMajorVersion) + "." + std::to_string(m_osvi.dwMinorVersion) + "." +
+                      std::to_string(m_osvi.dwBuildNumber);
             }
         }
     }
@@ -414,7 +414,7 @@ void OS::getPriority(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
-    if (hProcess == NULL) {
+    if (hProcess == nullptr) {
         p_isolate->ThrowException(
             v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "Could not open process")));
         return;
@@ -476,7 +476,7 @@ void OS::setPriority(const v8::FunctionCallbackInfo<v8::Value>& args) {
         priorityClass = REALTIME_PRIORITY_CLASS;
 
     HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pid);
-    if (hProcess == NULL) {
+    if (hProcess == nullptr) {
         p_isolate->ThrowException(
             v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "Could not open process")));
         return;

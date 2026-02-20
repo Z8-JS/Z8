@@ -54,15 +54,15 @@ void Timer::setTimeout(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     int32_t id = m_next_timer_id++;
     auto up_timer = std::make_unique<TimerData>();
-    up_timer->id = id;
-    up_timer->callback.Reset(p_isolate, args[0].As<v8::Function>());
-    up_timer->expiry = std::chrono::steady_clock::now() + std::chrono::milliseconds(delay);
-    up_timer->is_interval = false;
-    up_timer->interval_ms = 0;
+    up_timer->m_id = id;
+    up_timer->m_callback.Reset(p_isolate, args[0].As<v8::Function>());
+    up_timer->m_expiry = std::chrono::steady_clock::now() + std::chrono::milliseconds(delay);
+    up_timer->m_is_interval = false;
+    up_timer->m_interval_ms = 0;
 
     // Capture extra arguments
     for (int32_t i = 2; i < args.Length(); i++) {
-        up_timer->args.emplace_back(p_isolate, args[i]);
+        up_timer->m_args.emplace_back(p_isolate, args[i]);
     }
 
     m_timers[id] = std::move(up_timer);
@@ -86,15 +86,15 @@ void Timer::setInterval(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     int32_t id = m_next_timer_id++;
     auto up_timer = std::make_unique<TimerData>();
-    up_timer->id = id;
-    up_timer->callback.Reset(p_isolate, args[0].As<v8::Function>());
-    up_timer->expiry = std::chrono::steady_clock::now() + std::chrono::milliseconds(delay);
-    up_timer->is_interval = true;
-    up_timer->interval_ms = delay;
+    up_timer->m_id = id;
+    up_timer->m_callback.Reset(p_isolate, args[0].As<v8::Function>());
+    up_timer->m_expiry = std::chrono::steady_clock::now() + std::chrono::milliseconds(delay);
+    up_timer->m_is_interval = true;
+    up_timer->m_interval_ms = delay;
 
     // Capture extra arguments
     for (int32_t i = 2; i < args.Length(); i++) {
-        up_timer->args.emplace_back(p_isolate, args[i]);
+        up_timer->m_args.emplace_back(p_isolate, args[i]);
     }
 
     m_timers[id] = std::move(up_timer);
@@ -125,14 +125,14 @@ bool Timer::tick(v8::Isolate* p_isolate, v8::Local<v8::Context> p_context) {
     std::vector<int32_t> to_run;
 
     for (auto const& [id, up_timer] : m_timers) {
-        if (up_timer->expiry <= now) {
+        if (up_timer->m_expiry <= now) {
             to_run.push_back(id);
         }
     }
 
     // Sort by expiry to maintain order for same-time timers
     std::sort(
-        to_run.begin(), to_run.end(), [](int32_t a, int32_t b) { return m_timers[a]->expiry < m_timers[b]->expiry; });
+        to_run.begin(), to_run.end(), [](int32_t a, int32_t b) { return m_timers[a]->m_expiry < m_timers[b]->m_expiry; });
 
     for (int32_t id : to_run) {
         auto it = m_timers.find(id);
@@ -145,16 +145,16 @@ bool Timer::tick(v8::Isolate* p_isolate, v8::Local<v8::Context> p_context) {
         m_running_timer_id = id;
         m_running_timer_cleared = false;
 
-        v8::Local<v8::Function> cb = up_timer->callback.Get(p_isolate);
+        v8::Local<v8::Function> cb = up_timer->m_callback.Get(p_isolate);
 
         std::vector<v8::Local<v8::Value>> js_args;
-        for (auto& arg : up_timer->args) {
+        for (auto& arg : up_timer->m_args) {
             js_args.push_back(arg.Get(p_isolate));
         }
 
         // Call the callback. If it throws, the isolation outer TryCatch in main.cpp will see it.
         v8::MaybeLocal<v8::Value> result =
-            cb->Call(p_context, p_context->Global(), static_cast<int>(js_args.size()), js_args.data());
+            cb->Call(p_context, p_context->Global(), static_cast<int32_t>(js_args.size()), js_args.data());
 
         m_running_timer_id = -1;
 
@@ -163,9 +163,9 @@ bool Timer::tick(v8::Isolate* p_isolate, v8::Local<v8::Context> p_context) {
         }
 
         // Reschedule if it's an interval and wasn't cleared during execution
-        if (up_timer->is_interval && !m_running_timer_cleared) {
-            up_timer->expiry = std::chrono::steady_clock::now() + std::chrono::milliseconds(up_timer->interval_ms);
-            m_timers[up_timer->id] = std::move(up_timer);
+        if (up_timer->m_is_interval && !m_running_timer_cleared) {
+            up_timer->m_expiry = std::chrono::steady_clock::now() + std::chrono::milliseconds(up_timer->m_interval_ms);
+            m_timers[up_timer->m_id] = std::move(up_timer);
         }
     }
 
@@ -184,8 +184,8 @@ std::chrono::milliseconds Timer::getNextDelay() {
     auto min_expiry = std::chrono::steady_clock::time_point::max();
 
     for (auto const& [id, up_timer] : m_timers) {
-        if (up_timer->expiry < min_expiry) {
-            min_expiry = up_timer->expiry;
+        if (up_timer->m_expiry < min_expiry) {
+            min_expiry = up_timer->m_expiry;
         }
     }
 

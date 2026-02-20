@@ -58,11 +58,11 @@ class Runtime {
   public:
     static void Initialize(const char* exec_path) {
         // Clean high-performance V8 flags
-        const char* flags = "--stack-size=2048 "
-                            "--max-semi-space-size=128 "
-                            "--no-optimize-for-size "
-                            "--turbo-fast-api-calls";
-        v8::V8::SetFlagsFromString(flags);
+        const char* p_flags = "--stack-size=2048 "
+                              "--max-semi-space-size=128 "
+                              "--no-optimize-for-size "
+                              "--turbo-fast-api-calls";
+        v8::V8::SetFlagsFromString(p_flags);
 
         v8::V8::InitializeICUDefaultLocation(exec_path);
 
@@ -388,11 +388,11 @@ class Runtime {
         while (keep_running) {
             // 1. Process Tasks from Thread Pool
             while (!z8::TaskQueue::getInstance().isEmpty()) {
-                z8::Task* task = z8::TaskQueue::getInstance().dequeue();
-                if (task) {
+                z8::Task* p_task = z8::TaskQueue::getInstance().dequeue();
+                if (p_task) {
                     v8::TryCatch task_try_catch(isolate);
-                    task->runner(isolate, context, task);
-                    delete task;
+                    p_task->m_runner(isolate, context, p_task);
+                    delete p_task;
 
                     // Resume JS execution
                     isolate->PerformMicrotaskCheckpoint();
@@ -431,7 +431,7 @@ class Runtime {
                 std::chrono::milliseconds delay = z8::module::Timer::getNextDelay();
                 std::chrono::milliseconds timeout(50); // Balanced polling
                 if (delay.count() >= 0) {
-                    timeout = std::chrono::milliseconds(std::min((long long) delay.count(), 50LL));
+                    timeout = std::chrono::milliseconds(std::min(static_cast<int64_t>(delay.count()), 50LL));
                 }
                 z8::TaskQueue::getInstance().wait(timeout);
             }
@@ -504,10 +504,10 @@ class Runtime {
             v8::String::Utf8Value filename(isolate, resource_name);
 
             int32_t linenum = message->GetLineNumber(context).FromMaybe(-1);
-            const char* filename_str = *filename ? *filename : "unknown";
-            const char* exception_str = *exception ? *exception : "unknown";
+            const char* p_filename_str = *filename ? *filename : "unknown";
+            const char* p_exception_str = *exception ? *exception : "unknown";
 
-            std::cerr << filename_str << ":" << linenum << ": " << exception_str << std::endl;
+            std::cerr << p_filename_str << ":" << linenum << ": " << p_exception_str << std::endl;
 
             v8::MaybeLocal<v8::String> sourceline_maybe = message->GetSourceLine(context);
             if (!sourceline_maybe.IsEmpty()) {

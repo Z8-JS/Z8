@@ -12,14 +12,14 @@
 namespace z8 {
 
 struct Task {
-    v8::Global<v8::Function> callback;
-    v8::Global<v8::Promise::Resolver> resolver;
-    bool is_promise;
-    std::function<void(v8::Isolate*, v8::Local<v8::Context>, Task*)> runner;
+    v8::Global<v8::Function> m_callback;
+    v8::Global<v8::Promise::Resolver> m_resolver;
+    bool m_is_promise;
+    std::function<void(v8::Isolate*, v8::Local<v8::Context>, Task*)> m_runner;
 
     // Data (managed by the specific task)
     void* p_data;
-    int32_t error_code;
+    int32_t m_error_code;
 };
 
 class TaskQueue {

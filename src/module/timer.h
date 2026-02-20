@@ -28,12 +28,12 @@ class Timer {
 
   private:
     struct TimerData {
-        int32_t id;
-        v8::Global<v8::Function> callback;
-        std::chrono::steady_clock::time_point expiry;
-        std::vector<v8::Global<v8::Value>> args;
-        int32_t interval_ms;
-        bool is_interval;
+        int32_t m_id;
+        v8::Global<v8::Function> m_callback;
+        std::chrono::steady_clock::time_point m_expiry;
+        std::vector<v8::Global<v8::Value>> m_args;
+        int32_t m_interval_ms;
+        bool m_is_interval;
     };
 
     static std::map<int32_t, std::unique_ptr<TimerData>> m_timers;
