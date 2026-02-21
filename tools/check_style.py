@@ -337,7 +337,8 @@ class StyleChecker:
         return base in _WIN32_TYPES
 
     def _is_pointer_type(self, type_str: str) -> bool:
-        return '*' in type_str or type_str.strip().endswith('*')
+        stripped = _strip_angle_brackets(type_str)
+        return '*' in stripped or stripped.strip().endswith('*')
 
     def _classify_smart_ptr(self, type_str: str):
         t = type_str.replace(' ', '')
@@ -357,7 +358,7 @@ class StyleChecker:
         if not m: return
         name = m.group('name')
         type_str = m.group('type')
-        if name in self._IGNORED_NAMES or self._is_external_ns(clean, ns_aliases) or self._is_v8_related(clean, type_str):
+        if name in self._IGNORED_NAMES:
             return
         if self._is_win32_type(type_str):
             return
@@ -379,7 +380,7 @@ class StyleChecker:
         if not m: return
         name = m.group('name')
         type_str = m.group('type')
-        if name in self._IGNORED_NAMES or self._is_external_ns(clean, ns_aliases) or self._is_v8_related(clean, type_str):
+        if name in self._IGNORED_NAMES:
             return
         if self._is_win32_type(type_str):
             return

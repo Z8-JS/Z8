@@ -47,6 +47,14 @@ if (-not (Get-Command "cl.exe" -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
+# Ensure build directory exists
+if (-not (Test-Path "build")) {
+    New-Item -ItemType Directory -Path "build" | Out-Null
+}
+
+# Clean up old object files in root to avoid confusion
+Remove-Item -Path "*.obj" -ErrorAction SilentlyContinue
+
 Write-Host "Building Zane V8 (Z8)..."
 Write-Host "Configuration: $Config"
 
@@ -62,16 +70,17 @@ $cppFlags = @(
     "/O2", "/Oi", "/Ot", "/MT", "/DNDEBUG",
     "/DV8_COMPRESS_POINTERS",
     "/nologo", "/c",
+    "/Fo`"build\\`"",  # Redirect object files to build directory
     "/Iv8/include", "/Isrc", "/Ideps/zlib", "/Ideps/brotli/c/include"
 )
 
 $linkFlags = @(
     "/OUT:z8.exe", "/SUBSYSTEM:CONSOLE", "/MACHINE:X64", "/NOLOGO",
-    "main.obj", "temporal_shims.obj", "console.obj", "fs.obj", "path.obj", "os.obj", "process.obj", "util.obj", "timer.obj", "zlib.obj",
-    "adler32.obj", "compress.obj", "crc32.obj", "deflate.obj", "infback.obj", "inffast.obj", "inflate.obj", "inftrees.obj", "trees.obj", "uncompr.obj", "zutil.obj",
-    "constants.obj", "context.obj", "dictionary.obj", "platform.obj", "shared_dictionary.obj", "transform.obj",
-    "bit_reader.obj", "decode.obj", "huffman.obj", "prefix.obj", "state.obj", "static_init_dec.obj",
-    "backward_references.obj", "backward_references_hq.obj", "bit_cost.obj", "block_splitter.obj", "brotli_bit_stream.obj", "cluster.obj", "command.obj", "compound_dictionary.obj", "compress_fragment.obj", "compress_fragment_two_pass.obj", "dictionary_hash.obj", "encode.obj", "encoder_dict.obj", "entropy_encode.obj", "fast_log.obj", "histogram.obj", "literal_cost.obj", "memory.obj", "metablock.obj", "static_dict.obj", "static_dict_lut.obj", "static_init_enc.obj", "utf8_util.obj",
+    "build\main.obj", "build\temporal_shims.obj", "build\console.obj", "build\fs.obj", "build\path.obj", "build\os.obj", "build\process.obj", "build\util.obj", "build\timer.obj", "build\zlib.obj",
+    "build\adler32.obj", "build\compress.obj", "build\crc32.obj", "build\deflate.obj", "build\infback.obj", "build\inffast.obj", "build\inflate.obj", "build\inftrees.obj", "build\trees.obj", "build\uncompr.obj", "build\zutil.obj",
+    "build\constants.obj", "build\context.obj", "build\dictionary.obj", "build\platform.obj", "build\shared_dictionary.obj", "build\transform.obj",
+    "build\bit_reader.obj", "build\decode.obj", "build\huffman.obj", "build\prefix.obj", "build\state.obj", "build\static_init_dec.obj",
+    "build\backward_references.obj", "build\backward_references_hq.obj", "build\bit_cost.obj", "build\block_splitter.obj", "build\brotli_bit_stream.obj", "build\cluster.obj", "build\command.obj", "build\compound_dictionary.obj", "build\compress_fragment.obj", "build\compress_fragment_two_pass.obj", "build\dictionary_hash.obj", "build\encode.obj", "build\encoder_dict.obj", "build\entropy_encode.obj", "build\fast_log.obj", "build\histogram.obj", "build\literal_cost.obj", "build\memory.obj", "build\metablock.obj", "build\static_dict.obj", "build\static_dict_lut.obj", "build\static_init_enc.obj", "build\utf8_util.obj",
     "V8\out.gn\x64.release\obj\v8_monolith.lib",
     "libcmt.lib", "libcpmt.lib",
     "winmm.lib", "dbghelp.lib", "shlwapi.lib", "user32.lib", "iphlpapi.lib",
@@ -104,9 +113,9 @@ if ($LASTEXITCODE -ne 0) { Write-Host "Compilation failed!"; exit 1 }
 
 # Compile the two static_init.c files individually with distinct output names
 Write-Host "Compiling brotli static_init files..."
-& cl.exe $cppFlags "/Fostatic_init_dec.obj" "deps/brotli/c/dec/static_init.c"
+& cl.exe $cppFlags "/Fobuild\\static_init_dec.obj" "deps/brotli/c/dec/static_init.c"
 if ($LASTEXITCODE -ne 0) { Write-Host "Compilation failed (static_init_dec)!"; exit 1 }
-& cl.exe $cppFlags "/Fostatic_init_enc.obj" "deps/brotli/c/enc/static_init.c"
+& cl.exe $cppFlags "/Fobuild\\static_init_enc.obj" "deps/brotli/c/enc/static_init.c"
 if ($LASTEXITCODE -ne 0) { Write-Host "Compilation failed (static_init_enc)!"; exit 1 }
 
 

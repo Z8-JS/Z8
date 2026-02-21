@@ -183,16 +183,16 @@ void Util::promisify(const v8::FunctionCallbackInfo<v8::Value>& args) {
             v8::Local<v8::Promise::Resolver>::New(p_isolate, v8::Promise::Resolver::New(context).ToLocalChecked());
 
         struct CallbackData {
-            v8::Global<v8::Promise::Resolver> resolver;
+            v8::Global<v8::Promise::Resolver> m_resolver;
         };
-        auto* data = new CallbackData{v8::Global<v8::Promise::Resolver>(p_isolate, resolver)};
+        auto* p_data = new CallbackData{v8::Global<v8::Promise::Resolver>(p_isolate, resolver)};
 
         auto callback_wrapper = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
             v8::Isolate* p_isolate = args.GetIsolate();
             v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
             auto* p_cb_data = static_cast<CallbackData*>(v8::Local<v8::External>::Cast(args.Data())->Value());
 
-            v8::Local<v8::Promise::Resolver> resolver = p_cb_data->resolver.Get(p_isolate);
+            v8::Local<v8::Promise::Resolver> resolver = p_cb_data->m_resolver.Get(p_isolate);
 
             if (args.Length() > 0 && !args[0]->IsNull() && !args[0]->IsUndefined()) {
                 resolver->Reject(context, args[0]).Check();
@@ -204,12 +204,12 @@ void Util::promisify(const v8::FunctionCallbackInfo<v8::Value>& args) {
                 resolver->Resolve(context, result).Check();
             }
 
-            p_cb_data->resolver.Reset();
+            p_cb_data->m_resolver.Reset();
             delete p_cb_data;
         };
 
         v8::Local<v8::Function> callback =
-            v8::Function::New(context, callback_wrapper, v8::External::New(p_isolate, data)).ToLocalChecked();
+            v8::Function::New(context, callback_wrapper, v8::External::New(p_isolate, p_data)).ToLocalChecked();
 
         std::vector<v8::Local<v8::Value>> call_args;
         for (int32_t i = 0; i < args.Length(); i++) {
@@ -277,7 +277,7 @@ void Util::callbackify(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
             struct CallbackData {
                 v8::Isolate* p_isolate;
-                v8::Global<v8::Function> callback;
+                v8::Global<v8::Function> m_callback;
             };
             auto* p_data = new CallbackData{p_isolate, v8::Global<v8::Function>(p_isolate, callback)};
 
@@ -285,12 +285,12 @@ void Util::callbackify(const v8::FunctionCallbackInfo<v8::Value>& args) {
                 auto* p_data = static_cast<CallbackData*>(v8::Local<v8::External>::Cast(args.Data())->Value());
                 v8::Isolate* p_isolate = p_data->p_isolate;
                 v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
-                v8::Local<v8::Function> callback = p_data->callback.Get(p_isolate);
+                v8::Local<v8::Function> callback = p_data->m_callback.Get(p_isolate);
 
                 v8::Local<v8::Value> cb_args[] = {v8::Null(p_isolate), args[0]};
                 v8::MaybeLocal<v8::Value> unused = callback->Call(context, v8::Undefined(p_isolate), 2, cb_args);
 
-                p_data->callback.Reset();
+                p_data->m_callback.Reset();
                 delete p_data;
             };
 
@@ -298,12 +298,12 @@ void Util::callbackify(const v8::FunctionCallbackInfo<v8::Value>& args) {
                 auto* p_data = static_cast<CallbackData*>(v8::Local<v8::External>::Cast(args.Data())->Value());
                 v8::Isolate* p_isolate = p_data->p_isolate;
                 v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
-                v8::Local<v8::Function> callback = p_data->callback.Get(p_isolate);
+                v8::Local<v8::Function> callback = p_data->m_callback.Get(p_isolate);
 
                 v8::Local<v8::Value> cb_args[] = {args[0]};
                 v8::MaybeLocal<v8::Value> unused = callback->Call(context, v8::Undefined(p_isolate), 1, cb_args);
 
-                p_data->callback.Reset();
+                p_data->m_callback.Reset();
                 delete p_data;
             };
 
@@ -330,11 +330,11 @@ void Util::inherits(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     v8::Local<v8::Object> constructor = args[0]->ToObject(context).ToLocalChecked();
-    v8::Local<v8::Object> superConstructor = args[1]->ToObject(context).ToLocalChecked();
+    v8::Local<v8::Object> super_constructor = args[1]->ToObject(context).ToLocalChecked();
 
     v8::Local<v8::Value> prototype;
-    if (superConstructor->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "prototype")).ToLocal(&prototype)) {
-        constructor->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "super_"), superConstructor).Check();
+    if (super_constructor->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "prototype")).ToLocal(&prototype)) {
+        constructor->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "super_"), super_constructor).Check();
         v8::Local<v8::Object> proto_obj = v8::Object::New(p_isolate);
         proto_obj->SetPrototypeV2(context, prototype).Check();
         constructor->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "prototype"), proto_obj).Check();
