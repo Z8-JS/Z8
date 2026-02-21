@@ -30,6 +30,7 @@
 #include "module/node/path/path.h"
 #include "module/node/process/process.h"
 #include "module/node/util/util.h"
+#include "module/node/zlib/zlib.h"
 #include "task_queue.h"
 #include "thread_pool.h"
 
@@ -299,6 +300,40 @@ class Runtime {
             return module;
         }
         
+        if (specifier_str == "node:zlib") {
+            v8::Local<v8::ObjectTemplate> zlib_template = z8::module::Zlib::createTemplate(p_isolate);
+            v8::Local<v8::Object> zlib_instance = zlib_template->NewInstance(context).ToLocalChecked();
+            v8::Local<v8::Array> prop_names = zlib_instance->GetPropertyNames(context).ToLocalChecked();
+
+            std::vector<v8::Local<v8::String>> export_names;
+            export_names.push_back(v8::String::NewFromUtf8Literal(p_isolate, "default"));
+            for (uint32_t i = 0; i < prop_names->Length(); ++i) {
+                export_names.push_back(prop_names->Get(context, i).ToLocalChecked().As<v8::String>());
+            }
+
+            auto module = v8::Module::CreateSyntheticModule(
+                p_isolate,
+                v8::String::NewFromUtf8Literal(p_isolate, "node:zlib"),
+                v8::MemorySpan<const v8::Local<v8::String>>(export_names.data(), export_names.size()),
+                [](v8::Local<v8::Context> context, v8::Local<v8::Module> module) -> v8::MaybeLocal<v8::Value> {
+                    v8::Isolate* p_isolate = v8::Isolate::GetCurrent();
+                    v8::Local<v8::ObjectTemplate> zlib_template = z8::module::Zlib::createTemplate(p_isolate);
+                    v8::Local<v8::Object> zlib_obj = zlib_template->NewInstance(context).ToLocalChecked();
+                    module
+                        ->SetSyntheticModuleExport(
+                            p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "default"), zlib_obj)
+                        .Check();
+                    v8::Local<v8::Array> prop_names = zlib_obj->GetPropertyNames(context).ToLocalChecked();
+                    for (uint32_t i = 0; i < prop_names->Length(); ++i) {
+                        v8::Local<v8::String> name = prop_names->Get(context, i).ToLocalChecked().As<v8::String>();
+                        module->SetSyntheticModuleExport(p_isolate, name, zlib_obj->Get(context, name).ToLocalChecked())
+                            .Check();
+                    }
+                    return v8::Undefined(p_isolate);
+                });
+            return module;
+        }
+
         if (specifier_str == "node:process") {
             v8::Local<v8::Object> process_instance = z8::module::Process::createObject(p_isolate, context);
             v8::Local<v8::Array> prop_names = process_instance->GetPropertyNames(context).ToLocalChecked();

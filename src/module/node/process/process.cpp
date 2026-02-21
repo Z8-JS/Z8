@@ -22,6 +22,11 @@
 #include <mach-o/dyld.h>
 #endif
 
+#include "../../../../deps/zlib/zlib.h"
+#include "../../../../deps/brotli/c/include/brotli/decode.h"
+#include "../../../../deps/brotli/c/include/brotli/encode.h"
+#include "../../../../deps/zstd/lib/zstd.h"
+
 namespace z8 {
 namespace module {
 
@@ -199,6 +204,29 @@ v8::Local<v8::Object> Process::createObject(v8::Isolate* p_isolate, v8::Local<v8
               v8::String::NewFromUtf8Literal(p_isolate, "v8"),
               v8::String::NewFromUtf8(p_isolate, v8::V8::GetVersion()).ToLocalChecked())
         .Check();
+    
+    versions_obj
+        ->Set(context,
+              v8::String::NewFromUtf8Literal(p_isolate, "zlib"),
+              v8::String::NewFromUtf8Literal(p_isolate, ZLIB_VERSION))
+        .Check();
+
+    uint32_t brotli_ver = BrotliDecoderVersion();
+    char brotli_ver_str[32];
+    snprintf(brotli_ver_str, sizeof(brotli_ver_str), "%u.%u.%u", 
+             brotli_ver >> 24, (brotli_ver >> 12) & 0xFFF, brotli_ver & 0xFFF);
+    versions_obj
+        ->Set(context,
+              v8::String::NewFromUtf8Literal(p_isolate, "brotli"),
+              v8::String::NewFromUtf8(p_isolate, brotli_ver_str).ToLocalChecked())
+        .Check();
+
+    versions_obj
+        ->Set(context,
+              v8::String::NewFromUtf8Literal(p_isolate, "zstd"),
+              v8::String::NewFromUtf8Literal(p_isolate, ZSTD_VERSION_STRING))
+        .Check();
+
     obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "versions"), versions_obj).Check();
 
     // Set process.release

@@ -43,6 +43,13 @@ class Zlib {
     static void createUnzip(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void createBrotliCompress(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void createBrotliDecompress(const v8::FunctionCallbackInfo<v8::Value>& args);
+
+    static void zstdCompressSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void zstdDecompressSync(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void zstdCompress(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void zstdDecompress(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void createZstdCompress(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void createZstdDecompress(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module

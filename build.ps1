@@ -71,7 +71,7 @@ $cppFlags = @(
     "/DV8_COMPRESS_POINTERS",
     "/nologo", "/c",
     "/Fo`"build\\`"",  # Redirect object files to build directory
-    "/Iv8/include", "/Isrc", "/Ideps/zlib", "/Ideps/brotli/c/include"
+    "/Iv8/include", "/Isrc", "/Ideps/zlib", "/Ideps/brotli/c/include", "/Ideps/zstd/lib"
 )
 
 $linkFlags = @(
@@ -81,6 +81,9 @@ $linkFlags = @(
     "build\constants.obj", "build\context.obj", "build\dictionary.obj", "build\platform.obj", "build\shared_dictionary.obj", "build\transform.obj",
     "build\bit_reader.obj", "build\decode.obj", "build\huffman.obj", "build\prefix.obj", "build\state.obj", "build\static_init_dec.obj",
     "build\backward_references.obj", "build\backward_references_hq.obj", "build\bit_cost.obj", "build\block_splitter.obj", "build\brotli_bit_stream.obj", "build\cluster.obj", "build\command.obj", "build\compound_dictionary.obj", "build\compress_fragment.obj", "build\compress_fragment_two_pass.obj", "build\dictionary_hash.obj", "build\encode.obj", "build\encoder_dict.obj", "build\entropy_encode.obj", "build\fast_log.obj", "build\histogram.obj", "build\literal_cost.obj", "build\memory.obj", "build\metablock.obj", "build\static_dict.obj", "build\static_dict_lut.obj", "build\static_init_enc.obj", "build\utf8_util.obj",
+    "build\debug.obj", "build\entropy_common.obj", "build\error_private.obj", "build\fse_decompress.obj", "build\pool.obj", "build\threading.obj", "build\xxhash.obj", "build\zstd_common.obj",
+    "build\fse_compress.obj", "build\hist.obj", "build\huf_compress.obj", "build\zstd_compress.obj", "build\zstd_compress_literals.obj", "build\zstd_compress_sequences.obj", "build\zstd_compress_superblock.obj", "build\zstd_double_fast.obj", "build\zstd_fast.obj", "build\zstd_lazy.obj", "build\zstd_ldm.obj", "build\zstd_opt.obj", "build\zstd_preSplit.obj", "build\zstdmt_compress.obj",
+    "build\huf_decompress.obj", "build\zstd_ddict.obj", "build\zstd_decompress.obj", "build\zstd_decompress_block.obj",
     "V8\out.gn\x64.release\obj\v8_monolith.lib",
     "libcmt.lib", "libcpmt.lib",
     "winmm.lib", "dbghelp.lib", "shlwapi.lib", "user32.lib", "iphlpapi.lib",
@@ -108,6 +111,9 @@ $sources += @("deps/brotli/c/common/constants.c", "deps/brotli/c/common/context.
 # be compiled individually with /Fo to avoid object-name collisions.
 $sources += @("deps/brotli/c/dec/bit_reader.c", "deps/brotli/c/dec/decode.c", "deps/brotli/c/dec/huffman.c", "deps/brotli/c/dec/prefix.c", "deps/brotli/c/dec/state.c")
 $sources += @("deps/brotli/c/enc/backward_references.c", "deps/brotli/c/enc/backward_references_hq.c", "deps/brotli/c/enc/bit_cost.c", "deps/brotli/c/enc/block_splitter.c", "deps/brotli/c/enc/brotli_bit_stream.c", "deps/brotli/c/enc/cluster.c", "deps/brotli/c/enc/command.c", "deps/brotli/c/enc/compound_dictionary.c", "deps/brotli/c/enc/compress_fragment.c", "deps/brotli/c/enc/compress_fragment_two_pass.c", "deps/brotli/c/enc/dictionary_hash.c", "deps/brotli/c/enc/encode.c", "deps/brotli/c/enc/encoder_dict.c", "deps/brotli/c/enc/entropy_encode.c", "deps/brotli/c/enc/fast_log.c", "deps/brotli/c/enc/histogram.c", "deps/brotli/c/enc/literal_cost.c", "deps/brotli/c/enc/memory.c", "deps/brotli/c/enc/metablock.c", "deps/brotli/c/enc/static_dict.c", "deps/brotli/c/enc/static_dict_lut.c", "deps/brotli/c/enc/utf8_util.c")
+$sources += @("deps/zstd/lib/common/debug.c", "deps/zstd/lib/common/entropy_common.c", "deps/zstd/lib/common/error_private.c", "deps/zstd/lib/common/fse_decompress.c", "deps/zstd/lib/common/pool.c", "deps/zstd/lib/common/threading.c", "deps/zstd/lib/common/xxhash.c", "deps/zstd/lib/common/zstd_common.c")
+$sources += @("deps/zstd/lib/compress/fse_compress.c", "deps/zstd/lib/compress/hist.c", "deps/zstd/lib/compress/huf_compress.c", "deps/zstd/lib/compress/zstd_compress.c", "deps/zstd/lib/compress/zstd_compress_literals.c", "deps/zstd/lib/compress/zstd_compress_sequences.c", "deps/zstd/lib/compress/zstd_compress_superblock.c", "deps/zstd/lib/compress/zstd_double_fast.c", "deps/zstd/lib/compress/zstd_fast.c", "deps/zstd/lib/compress/zstd_lazy.c", "deps/zstd/lib/compress/zstd_ldm.c", "deps/zstd/lib/compress/zstd_opt.c", "deps/zstd/lib/compress/zstd_preSplit.c", "deps/zstd/lib/compress/zstdmt_compress.c")
+$sources += @("deps/zstd/lib/decompress/huf_decompress.c", "deps/zstd/lib/decompress/zstd_ddict.c", "deps/zstd/lib/decompress/zstd_decompress.c", "deps/zstd/lib/decompress/zstd_decompress_block.c")
 & cl.exe $cppFlags $sources
 if ($LASTEXITCODE -ne 0) { Write-Host "Compilation failed!"; exit 1 }
 
