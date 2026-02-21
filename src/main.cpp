@@ -25,6 +25,7 @@
 #include "module/timer.h"
 
 // Interface for the node.js module
+#include "module/node/buffer/buffer.h"
 #include "module/node/fs/fs.h"
 #include "module/node/os/os.h"
 #include "module/node/path/path.h"
@@ -109,6 +110,9 @@ class Runtime {
 
         // Initialize Timer module
         z8::module::Timer::initialize(p_isolate, context);
+
+        // Initialize Buffer module (global object)
+        z8::module::Buffer::initialize(p_isolate, context);
     }
 
     ~Runtime() {
@@ -329,6 +333,28 @@ class Runtime {
                         module->SetSyntheticModuleExport(p_isolate, name, zlib_obj->Get(context, name).ToLocalChecked())
                             .Check();
                     }
+                    return v8::Undefined(p_isolate);
+                });
+            return module;
+        }
+
+        if (specifier_str == "node:buffer") {
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::Value> buffer_val = context->Global()->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "Buffer")).ToLocalChecked();
+            
+            std::vector<v8::Local<v8::String>> export_names;
+            export_names.push_back(v8::String::NewFromUtf8Literal(p_isolate, "default"));
+            export_names.push_back(v8::String::NewFromUtf8Literal(p_isolate, "Buffer"));
+            
+            auto module = v8::Module::CreateSyntheticModule(
+                p_isolate,
+                v8::String::NewFromUtf8Literal(p_isolate, "node:buffer"),
+                v8::MemorySpan<const v8::Local<v8::String>>(export_names.data(), export_names.size()),
+                [](v8::Local<v8::Context> context, v8::Local<v8::Module> module) -> v8::MaybeLocal<v8::Value> {
+                    v8::Isolate* p_isolate = v8::Isolate::GetCurrent();
+                    v8::Local<v8::Value> buffer_val = context->Global()->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "Buffer")).ToLocalChecked();
+                    module->SetSyntheticModuleExport(p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "default"), buffer_val).Check();
+                    module->SetSyntheticModuleExport(p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "Buffer"), buffer_val).Check();
                     return v8::Undefined(p_isolate);
                 });
             return module;

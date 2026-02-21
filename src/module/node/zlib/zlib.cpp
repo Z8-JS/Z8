@@ -1,4 +1,6 @@
 #include "zlib.h"
+#include "../buffer/buffer.h"
+#include <iostream>
 #include <vector>
 #include <cstring>
 #include <string>
@@ -85,11 +87,25 @@ static void parseZstdOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> cont
     }
 }
 
-static bool getInput(const v8::FunctionCallbackInfo<v8::Value>& args, uint8_t** p_data, size_t* length) {
+static bool getInput(const v8::FunctionCallbackInfo<v8::Value>& args, uint8_t** p_data, size_t* length, std::vector<uint8_t>& storage) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    if (args.Length() < 1 || !args[0]->IsUint8Array()) {
+    if (args.Length() < 1) {
         p_isolate->ThrowException(v8::Exception::TypeError(
-            v8::String::NewFromUtf8Literal(p_isolate, "Argument must be a Uint8Array")));
+            v8::String::NewFromUtf8Literal(p_isolate, "Argument required")));
+        return false;
+    }
+
+    if (args[0]->IsString()) {
+        v8::String::Utf8Value str(p_isolate, args[0]);
+        storage.assign(reinterpret_cast<uint8_t*>(*str), reinterpret_cast<uint8_t*>(*str) + str.length());
+        *p_data = storage.data();
+        *length = storage.size();
+        return true;
+    }
+
+    if (!args[0]->IsUint8Array()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Argument must be a Uint8Array or string")));
         return false;
     }
 
@@ -102,9 +118,9 @@ static bool getInput(const v8::FunctionCallbackInfo<v8::Value>& args, uint8_t** 
 
 static void returnBuffer(const v8::FunctionCallbackInfo<v8::Value>& args, const std::vector<uint8_t>& out_buffer) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    v8::Local<v8::ArrayBuffer> result_ab = v8::ArrayBuffer::New(p_isolate, out_buffer.size());
-    memcpy(result_ab->GetBackingStore()->Data(), out_buffer.data(), out_buffer.size());
-    args.GetReturnValue().Set(v8::Uint8Array::New(result_ab, 0, out_buffer.size()));
+    v8::Local<v8::Uint8Array> ui = z8::module::Buffer::createBuffer(p_isolate, out_buffer.size());
+    memcpy(ui->Buffer()->GetBackingStore()->Data(), out_buffer.data(), out_buffer.size());
+    args.GetReturnValue().Set(ui);
 }
 
 v8::Local<v8::ObjectTemplate> Zlib::createTemplate(v8::Isolate* p_isolate) {
@@ -251,7 +267,8 @@ static void doDeflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     uint8_t* p_data;
     size_t length;
-    if (!getInput(args, &p_data, &length)) return;
+    std::vector<uint8_t> storage;
+    if (!getInput(args, &p_data, &length, storage)) return;
 
     int32_t level = Z_DEFAULT_COMPRESSION;
     int32_t window_bits = default_window_bits;
@@ -306,7 +323,8 @@ static void doInflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     uint8_t* p_data;
     size_t length;
-    if (!getInput(args, &p_data, &length)) return;
+    std::vector<uint8_t> storage;
+    if (!getInput(args, &p_data, &length, storage)) return;
 
     int32_t level = Z_DEFAULT_COMPRESSION;
     int32_t window_bits = default_window_bits;
@@ -362,7 +380,8 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     uint8_t* p_data;
     size_t length;
-    if (!getInput(args, &p_data, &length)) return;
+    std::vector<uint8_t> storage;
+    if (!getInput(args, &p_data, &length, storage)) return;
     v8::Local<v8::Function> callback;
     if (args.Length() >= 2 && args[args.Length() - 1]->IsFunction()) {
         callback = args[args.Length() - 1].As<v8::Function>();
@@ -619,7 +638,8 @@ void Zlib::brotliCompressSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     uint8_t* p_data;
     size_t length;
-    if (!getInput(args, &p_data, &length)) return;
+    std::vector<uint8_t> storage;
+    if (!getInput(args, &p_data, &length, storage)) return;
 
     int32_t quality = BROTLI_DEFAULT_QUALITY;
     int32_t window = BROTLI_DEFAULT_WINDOW;
@@ -645,7 +665,8 @@ void Zlib::brotliDecompressSync(const v8::FunctionCallbackInfo<v8::Value>& args)
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     uint8_t* p_data;
     size_t length;
-    if (!getInput(args, &p_data, &length)) return;
+    std::vector<uint8_t> storage;
+    if (!getInput(args, &p_data, &length, storage)) return;
 
     // Brotli decompress options are less common in sync, but we could parse them
     BrotliDecoderState* p_s = BrotliDecoderCreateInstance(nullptr, nullptr, nullptr);
@@ -685,7 +706,8 @@ void Zlib::zstdCompressSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     uint8_t* p_data;
     size_t length;
-    if (!getInput(args, &p_data, &length)) return;
+    std::vector<uint8_t> storage;
+    if (!getInput(args, &p_data, &length, storage)) return;
 
     int32_t level = 3;
     if (args.Length() >= 2) {
@@ -709,7 +731,8 @@ void Zlib::zstdDecompressSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     uint8_t* p_data;
     size_t length;
-    if (!getInput(args, &p_data, &length)) return;
+    std::vector<uint8_t> storage;
+    if (!getInput(args, &p_data, &length, storage)) return;
 
     uint64_t const decoded_size = ZSTD_getFrameContentSize(p_data, length);
     if (decoded_size != ZSTD_CONTENTSIZE_ERROR && decoded_size != ZSTD_CONTENTSIZE_UNKNOWN) {
@@ -765,7 +788,8 @@ void Zlib::crc32(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     uint8_t* p_data;
     size_t length;
-    if (!getInput(args, &p_data, &length)) return;
+    std::vector<uint8_t> storage;
+    if (!getInput(args, &p_data, &length, storage)) return;
 
     uint32_t crc = 0;
     if (args.Length() >= 2 && args[1]->IsNumber()) {
@@ -780,7 +804,8 @@ void Zlib::adler32(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     uint8_t* p_data;
     size_t length;
-    if (!getInput(args, &p_data, &length)) return;
+    std::vector<uint8_t> storage;
+    if (!getInput(args, &p_data, &length, storage)) return;
 
     uint32_t adler = 1;
     if (args.Length() >= 2 && args[1]->IsNumber()) {

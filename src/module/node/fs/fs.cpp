@@ -9,7 +9,8 @@
 #include <v8-isolate.h>
 #ifdef _WIN32
 #include <io.h>
-#define ssize_t long long
+#include <BaseTsd.h>
+using ssize_t = SSIZE_T;
 #include <random>
 #include <sys/utime.h>
 
