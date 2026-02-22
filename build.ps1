@@ -74,6 +74,9 @@ $cppFlags = @(
     "/Iv8/include", "/Isrc", "/Ideps/zlib", "/Ideps/brotli/c/include", "/Ideps/zstd/lib"
 )
 
+# Variant without /Fo directory flag, for compiling individual files with explicit /Fo output path
+$cppFlagsNoFo = $cppFlags | Where-Object { $_ -notlike '/Fo*' }
+
 $linkFlags = @(
     "/OUT:z8.exe", "/SUBSYSTEM:CONSOLE", "/MACHINE:X64", "/NOLOGO",
     "build\main.obj", "build\temporal_shims.obj", "build\console.obj", "build\fs.obj", "build\path.obj", "build\os.obj", "build\process.obj", "build\util.obj", "build\timer.obj", "build\buffer.obj", "build\zlib.obj",
@@ -115,18 +118,21 @@ $sources += @("deps/brotli/c/common/constants.c", "deps/brotli/c/common/context.
 $sources += @("deps/brotli/c/dec/bit_reader.c", "deps/brotli/c/dec/decode.c", "deps/brotli/c/dec/huffman.c", "deps/brotli/c/dec/prefix.c", "deps/brotli/c/dec/state.c")
 $sources += @("deps/brotli/c/enc/backward_references.c", "deps/brotli/c/enc/backward_references_hq.c", "deps/brotli/c/enc/bit_cost.c", "deps/brotli/c/enc/block_splitter.c", "deps/brotli/c/enc/brotli_bit_stream.c", "deps/brotli/c/enc/cluster.c", "deps/brotli/c/enc/command.c", "deps/brotli/c/enc/compound_dictionary.c", "deps/brotli/c/enc/compress_fragment.c", "deps/brotli/c/enc/compress_fragment_two_pass.c", "deps/brotli/c/enc/dictionary_hash.c", "deps/brotli/c/enc/encode.c", "deps/brotli/c/enc/encoder_dict.c", "deps/brotli/c/enc/entropy_encode.c", "deps/brotli/c/enc/fast_log.c", "deps/brotli/c/enc/histogram.c", "deps/brotli/c/enc/literal_cost.c", "deps/brotli/c/enc/memory.c", "deps/brotli/c/enc/metablock.c", "deps/brotli/c/enc/static_dict.c", "deps/brotli/c/enc/static_dict_lut.c", "deps/brotli/c/enc/utf8_util.c")
 $sources += @("deps/zstd/lib/common/debug.c", "deps/zstd/lib/common/entropy_common.c", "deps/zstd/lib/common/error_private.c", "deps/zstd/lib/common/fse_decompress.c", "deps/zstd/lib/common/pool.c", "deps/zstd/lib/common/threading.c", "deps/zstd/lib/common/xxhash.c", "deps/zstd/lib/common/zstd_common.c")
-$sources += @("deps/zstd/lib/compress/fse_compress.c", "deps/zstd/lib/compress/hist.c", "deps/zstd/lib/compress/huf_compress.c", "deps/zstd/lib/compress/zstd_compress.c", "deps/zstd/lib/compress/zstd_compress_literals.c", "deps/zstd/lib/compress/zstd_compress_sequences.c", "deps/zstd/lib/compress/zstd_compress_superblock.c", "deps/zstd/lib/compress/zstd_double_fast.c", "deps/zstd/lib/compress/zstd_fast.c", "deps/zstd/lib/compress/zstd_lazy.c", "deps/zstd/lib/compress/zstd_ldm.c", "deps/zstd/lib/compress/zstd_opt.c", "deps/zstd/lib/compress/zstd_preSplit.c", "deps/zstd/lib/compress/zstdmt_compress.c")
+$sources += @("deps/zstd/lib/compress/fse_compress.c", "deps/zstd/lib/compress/hist.c", "deps/zstd/lib/compress/huf_compress.c", "deps/zstd/lib/compress/zstd_compress.c", "deps/zstd/lib/compress/zstd_compress_literals.c", "deps/zstd/lib/compress/zstd_compress_sequences.c", "deps/zstd/lib/compress/zstd_compress_superblock.c", "deps/zstd/lib/compress/zstd_double_fast.c", "deps/zstd/lib/compress/zstd_fast.c", "deps/zstd/lib/compress/zstd_lazy.c", "deps/zstd/lib/compress/zstd_ldm.c", "deps/zstd/lib/compress/zstd_opt.c", "deps/zstd/lib/compress/zstdmt_compress.c")
 $sources += @("deps/zstd/lib/decompress/huf_decompress.c", "deps/zstd/lib/decompress/zstd_ddict.c", "deps/zstd/lib/decompress/zstd_decompress.c", "deps/zstd/lib/decompress/zstd_decompress_block.c")
 & cl.exe $cppFlags $sources
 if ($LASTEXITCODE -ne 0) { Write-Host "Compilation failed!"; exit 1 }
 
 # Compile the two static_init.c files individually with distinct output names
 Write-Host "Compiling brotli static_init files..."
-& cl.exe $cppFlags "/Fobuild\\static_init_dec.obj" "deps/brotli/c/dec/static_init.c"
+& cl.exe $cppFlagsNoFo "/Fobuild\static_init_dec.obj" "deps/brotli/c/dec/static_init.c"
 if ($LASTEXITCODE -ne 0) { Write-Host "Compilation failed (static_init_dec)!"; exit 1 }
-& cl.exe $cppFlags "/Fobuild\\static_init_enc.obj" "deps/brotli/c/enc/static_init.c"
+& cl.exe $cppFlagsNoFo "/Fobuild\static_init_enc.obj" "deps/brotli/c/enc/static_init.c"
 if ($LASTEXITCODE -ne 0) { Write-Host "Compilation failed (static_init_enc)!"; exit 1 }
-
+# Compile zstd_preSplit.c separately to guarantee ZSTD_splitBlock is available
+Write-Host "Compiling zstd_preSplit.c..."
+& cl.exe $cppFlagsNoFo "/Fobuild\zstd_preSplit.obj" "deps/zstd/lib/compress/zstd_preSplit.c"
+if ($LASTEXITCODE -ne 0) { Write-Host "Compilation failed (zstd_preSplit)!"; exit 1 }
 
 
 # Step 4: Link
