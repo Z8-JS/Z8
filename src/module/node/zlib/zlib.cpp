@@ -32,6 +32,24 @@ static void zstdStreamEnd(const v8::FunctionCallbackInfo<v8::Value>& args);
 static void zstdStreamClose(const v8::FunctionCallbackInfo<v8::Value>& args);
 static void zstdStreamReset(const v8::FunctionCallbackInfo<v8::Value>& args);
 
+static void throwZlibError(v8::Isolate* p_isolate, int32_t ret, const char* p_msg = nullptr) {
+    const char* p_err_msg = p_msg ? p_msg : "Zlib error";
+    const char* p_error_code = "Z_UNKNOWN";
+    switch (ret) {
+        case Z_STREAM_ERROR: p_error_code = "Z_STREAM_ERROR"; break;
+        case Z_DATA_ERROR: p_error_code = "Z_DATA_ERROR"; break;
+        case Z_MEM_ERROR: p_error_code = "Z_MEM_ERROR"; break;
+        case Z_BUF_ERROR: p_error_code = "Z_BUF_ERROR"; break;
+        case Z_VERSION_ERROR: p_error_code = "Z_VERSION_ERROR"; break;
+    }
+    v8::Local<v8::Value> err = v8::Exception::Error(v8::String::NewFromUtf8(p_isolate, p_err_msg).ToLocalChecked());
+    v8::Local<v8::Object> obj = err.As<v8::Object>();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "code"), v8::String::NewFromUtf8(p_isolate, p_error_code).ToLocalChecked()).Check();
+    obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "errno"), v8::Integer::New(p_isolate, ret)).Check();
+    p_isolate->ThrowException(err);
+}
+
 struct ZlibAsyncCtx {
     std::vector<uint8_t> m_input;
     std::vector<uint8_t> m_output;
@@ -430,8 +448,9 @@ static void doDeflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
     strm.zfree = Z_NULL;
     strm.opaque = Z_NULL;
 
-    if (deflateInit2(&strm, level, Z_DEFLATED, window_bits, mem_level, strategy) != Z_OK) {
-        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "deflateInit failed")));
+    int32_t ret = deflateInit2(&strm, level, Z_DEFLATED, window_bits, mem_level, strategy);
+    if (ret != Z_OK) {
+        throwZlibError(p_isolate, ret, "deflateInit failed");
         return;
     }
 
@@ -443,7 +462,6 @@ static void doDeflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
     strm.avail_in = (uInt)length;
     std::vector<uint8_t> out_buffer;
     out_buffer.resize(chunk_size);
-    int32_t ret;
     size_t total_out = 0;
     do {
         if (total_out + chunk_size > out_buffer.size()) {
@@ -460,14 +478,14 @@ static void doDeflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
             p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "maxOutputLength exceeded")));
             return;
         }
+        if (ret != Z_STREAM_END && ret != Z_OK) {
+            deflateEnd(&strm);
+            throwZlibError(p_isolate, ret, "deflate failed");
+            return;
+        }
     } while (ret == Z_OK);
 
     deflateEnd(&strm);
-
-    if (ret != Z_STREAM_END) {
-        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "deflate failed")));
-        return;
-    }
 
     out_buffer.resize(total_out);
     returnBuffer(args, out_buffer);
@@ -501,13 +519,13 @@ static void doInflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
     strm.next_in = (Bytef*)p_data;
     strm.avail_in = (uInt)length;
 
-    if (inflateInit2(&strm, window_bits) != Z_OK) {
-        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "inflateInit failed")));
+    int32_t ret = inflateInit2(&strm, window_bits);
+    if (ret != Z_OK) {
+        throwZlibError(p_isolate, ret, "inflateInit failed");
         return;
     }
     std::vector<uint8_t> out_buffer;
     out_buffer.resize(chunk_size);
-    int32_t ret;
     size_t total_out = 0;
     do {
         if (total_out + chunk_size > out_buffer.size()) {
@@ -534,7 +552,7 @@ static void doInflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
 
         if (ret == Z_NEED_DICT || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR) {
             inflateEnd(&strm);
-            p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "inflate failed")));
+            throwZlibError(p_isolate, ret, "inflate failed");
             return;
         }
     } while (ret != Z_STREAM_END);
@@ -1073,6 +1091,8 @@ struct ZlibStreamObject {
     int32_t m_chunk_size = 16384;
     std::vector<uint8_t> m_dictionary;
     int32_t m_window_bits;
+    uint64_t m_bytes_read = 0;
+    uint64_t m_bytes_written = 0;
 
     ZlibStreamObject() {
         memset(&m_strm, 0, sizeof(m_strm));
@@ -1130,8 +1150,15 @@ static void streamProcess(const v8::FunctionCallbackInfo<v8::Value>& args, int32
         total_out += chunk_size - p_obj->m_strm.avail_out;
     } while (p_obj->m_strm.avail_out == 0 && ret == Z_OK);
 
+    p_obj->m_bytes_read += (length - p_obj->m_strm.avail_in);
+    p_obj->m_bytes_written += total_out;
+
+    v8::Local<v8::Context> ctx = p_isolate->GetCurrentContext();
+    self->Set(ctx, v8::String::NewFromUtf8Literal(p_isolate, "bytesRead"), v8::Number::New(p_isolate, (double)p_obj->m_bytes_read)).Check();
+    self->Set(ctx, v8::String::NewFromUtf8Literal(p_isolate, "bytesWritten"), v8::Number::New(p_isolate, (double)p_obj->m_bytes_written)).Check();
+
     if (ret != Z_OK && ret != Z_STREAM_END && ret != Z_BUF_ERROR) {
-        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "Zlib stream error")));
+        throwZlibError(p_isolate, ret);
         return;
     }
 
@@ -1283,6 +1310,8 @@ struct BrotliStreamObject {
     bool m_is_encoder;
     bool m_finished = false;
     int32_t m_chunk_size = 16384;
+    uint64_t m_bytes_read = 0;
+    uint64_t m_bytes_written = 0;
 
     BrotliStreamObject(bool enc_mode) : m_is_encoder(enc_mode) {
         if (m_is_encoder) p_enc = BrotliEncoderCreateInstance(nullptr, nullptr, nullptr);
@@ -1374,8 +1403,15 @@ static void brotliStreamWrite(const v8::FunctionCallbackInfo<v8::Value>& args) {
                 return;
             }
             if (res == BROTLI_DECODER_RESULT_SUCCESS) break;
+            if (res == BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT && available_in == 0) break;
         }
     }
+
+    p_obj->m_bytes_read += length;
+    p_obj->m_bytes_written += total_out;
+    v8::Local<v8::Context> ctx = p_isolate->GetCurrentContext();
+    self->Set(ctx, v8::String::NewFromUtf8Literal(p_isolate, "bytesRead"), v8::Number::New(p_isolate, (double)p_obj->m_bytes_read)).Check();
+    self->Set(ctx, v8::String::NewFromUtf8Literal(p_isolate, "bytesWritten"), v8::Number::New(p_isolate, (double)p_obj->m_bytes_written)).Check();
 
     v8::Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(p_isolate, total_out);
     memcpy(ab->GetBackingStore()->Data(), out_buffer.data(), total_out);
@@ -1488,6 +1524,8 @@ struct ZstdStreamObject {
     bool m_is_compressor;
     bool m_finished = false;
     int32_t m_chunk_size = 128 * 1024;
+    uint64_t m_bytes_read = 0;
+    uint64_t m_bytes_written = 0;
 
     ZstdStreamObject(bool compress_mode) : m_is_compressor(compress_mode) {
         if (m_is_compressor) p_cctx = ZSTD_createCCtx();
@@ -1577,6 +1615,12 @@ static void zstdStreamWrite(const v8::FunctionCallbackInfo<v8::Value>& args) {
             if (res == 0) break;
         }
     }
+
+    p_obj->m_bytes_read += length;
+    p_obj->m_bytes_written += total_out;
+    v8::Local<v8::Context> ctx = p_isolate->GetCurrentContext();
+    self->Set(ctx, v8::String::NewFromUtf8Literal(p_isolate, "bytesRead"), v8::Number::New(p_isolate, (double)p_obj->m_bytes_read)).Check();
+    self->Set(ctx, v8::String::NewFromUtf8Literal(p_isolate, "bytesWritten"), v8::Number::New(p_isolate, (double)p_obj->m_bytes_written)).Check();
 
     v8::Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(p_isolate, total_out);
     memcpy(ab->GetBackingStore()->Data(), out_buffer.data(), total_out);
