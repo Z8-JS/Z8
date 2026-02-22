@@ -105,17 +105,70 @@ v8::Local<v8::FunctionTemplate> Buffer::createTemplate(v8::Isolate* p_isolate) {
     // Static methods
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "alloc"), v8::FunctionTemplate::New(p_isolate, alloc));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "allocUnsafe"), v8::FunctionTemplate::New(p_isolate, allocUnsafe));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "allocUnsafeSlow"), v8::FunctionTemplate::New(p_isolate, allocUnsafeSlow));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "from"), v8::FunctionTemplate::New(p_isolate, from));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "concat"), v8::FunctionTemplate::New(p_isolate, concat));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "isBuffer"), v8::FunctionTemplate::New(p_isolate, isBuffer));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "isEncoding"), v8::FunctionTemplate::New(p_isolate, isEncoding));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "byteLength"), v8::FunctionTemplate::New(p_isolate, byteLength));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "compare"), v8::FunctionTemplate::New(p_isolate, compare));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "poolSize"), v8::Integer::New(p_isolate, 8192));
 
-    // Prototype methods (will be attached to instances)
+    // Prototype methods
     v8::Local<v8::ObjectTemplate> proto = tmpl->PrototypeTemplate();
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "toString"), v8::FunctionTemplate::New(p_isolate, toString));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, write));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "fill"), v8::FunctionTemplate::New(p_isolate, fill));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "copy"), v8::FunctionTemplate::New(p_isolate, copy));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "slice"), v8::FunctionTemplate::New(p_isolate, slice));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "subarray"), v8::FunctionTemplate::New(p_isolate, subarray));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "equals"), v8::FunctionTemplate::New(p_isolate, equals));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "compare"), v8::FunctionTemplate::New(p_isolate, compare_instance));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "indexOf"), v8::FunctionTemplate::New(p_isolate, indexOf));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "lastIndexOf"), v8::FunctionTemplate::New(p_isolate, lastIndexOf));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "includes"), v8::FunctionTemplate::New(p_isolate, includes));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "toJSON"), v8::FunctionTemplate::New(p_isolate, toJSON));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "swap16"), v8::FunctionTemplate::New(p_isolate, swap16));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "swap32"), v8::FunctionTemplate::New(p_isolate, swap32));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "swap64"), v8::FunctionTemplate::New(p_isolate, swap64));
+    // Read numeric
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUInt8"), v8::FunctionTemplate::New(p_isolate, readUInt8));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readInt8"), v8::FunctionTemplate::New(p_isolate, readInt8));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUInt16BE"), v8::FunctionTemplate::New(p_isolate, readUInt16BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUInt16LE"), v8::FunctionTemplate::New(p_isolate, readUInt16LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readInt16BE"), v8::FunctionTemplate::New(p_isolate, readInt16BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readInt16LE"), v8::FunctionTemplate::New(p_isolate, readInt16LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUInt32BE"), v8::FunctionTemplate::New(p_isolate, readUInt32BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUInt32LE"), v8::FunctionTemplate::New(p_isolate, readUInt32LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readInt32BE"), v8::FunctionTemplate::New(p_isolate, readInt32BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readInt32LE"), v8::FunctionTemplate::New(p_isolate, readInt32LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readFloatBE"), v8::FunctionTemplate::New(p_isolate, readFloatBE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readFloatLE"), v8::FunctionTemplate::New(p_isolate, readFloatLE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readDoubleBE"), v8::FunctionTemplate::New(p_isolate, readDoubleBE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readDoubleLE"), v8::FunctionTemplate::New(p_isolate, readDoubleLE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readBigInt64BE"), v8::FunctionTemplate::New(p_isolate, readBigInt64BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readBigInt64LE"), v8::FunctionTemplate::New(p_isolate, readBigInt64LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readBigUInt64BE"), v8::FunctionTemplate::New(p_isolate, readBigUInt64BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readBigUInt64LE"), v8::FunctionTemplate::New(p_isolate, readBigUInt64LE));
+    // Write numeric
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUInt8"), v8::FunctionTemplate::New(p_isolate, writeUInt8));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeInt8"), v8::FunctionTemplate::New(p_isolate, writeInt8));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUInt16BE"), v8::FunctionTemplate::New(p_isolate, writeUInt16BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUInt16LE"), v8::FunctionTemplate::New(p_isolate, writeUInt16LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeInt16BE"), v8::FunctionTemplate::New(p_isolate, writeInt16BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeInt16LE"), v8::FunctionTemplate::New(p_isolate, writeInt16LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUInt32BE"), v8::FunctionTemplate::New(p_isolate, writeUInt32BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUInt32LE"), v8::FunctionTemplate::New(p_isolate, writeUInt32LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeInt32BE"), v8::FunctionTemplate::New(p_isolate, writeInt32BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeInt32LE"), v8::FunctionTemplate::New(p_isolate, writeInt32LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeFloatBE"), v8::FunctionTemplate::New(p_isolate, writeFloatBE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeFloatLE"), v8::FunctionTemplate::New(p_isolate, writeFloatLE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeDoubleBE"), v8::FunctionTemplate::New(p_isolate, writeDoubleBE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeDoubleLE"), v8::FunctionTemplate::New(p_isolate, writeDoubleLE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeBigInt64BE"), v8::FunctionTemplate::New(p_isolate, writeBigInt64BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeBigInt64LE"), v8::FunctionTemplate::New(p_isolate, writeBigInt64LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeBigUInt64BE"), v8::FunctionTemplate::New(p_isolate, writeBigUInt64BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeBigUInt64LE"), v8::FunctionTemplate::New(p_isolate, writeBigUInt64LE));
 
     return tmpl;
 }
@@ -538,5 +591,590 @@ void Buffer::slice(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(result);
 }
 
+// ---- New static methods ----
+
+void Buffer::allocUnsafeSlow(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    alloc(args);
+}
+
+void Buffer::isEncoding(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 1 || !args[0]->IsString()) {
+        args.GetReturnValue().Set(v8::Boolean::New(p_isolate, false));
+        return;
+    }
+    v8::String::Utf8Value enc(p_isolate, args[0]);
+    std::string s(*enc);
+    bool valid = (s == "utf8" || s == "utf-8" || s == "ascii" || s == "latin1"
+               || s == "binary" || s == "base64" || s == "base64url"
+               || s == "hex" || s == "ucs2" || s == "ucs-2"
+               || s == "utf16le" || s == "utf-16le");
+    args.GetReturnValue().Set(v8::Boolean::New(p_isolate, valid));
+}
+
+void Buffer::byteLength(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 1) {
+        args.GetReturnValue().Set(v8::Integer::New(p_isolate, 0));
+        return;
+    }
+    if (args[0]->IsString()) {
+        std::string enc = "utf8";
+        if (args.Length() > 1 && args[1]->IsString()) {
+            v8::String::Utf8Value e(p_isolate, args[1]);
+            enc = *e;
+        }
+        if (enc == "hex") {
+            v8::String::Utf8Value str(p_isolate, args[0]);
+            args.GetReturnValue().Set(v8::Integer::New(p_isolate, static_cast<int32_t>(str.length() / 2)));
+            return;
+        }
+        if (enc == "base64" || enc == "base64url") {
+            v8::String::Utf8Value str(p_isolate, args[0]);
+            int32_t len = static_cast<int32_t>(str.length());
+            int32_t decoded = (len * 3) / 4;
+            if (len > 0 && (*str)[len - 1] == '=') decoded--;
+            if (len > 1 && (*str)[len - 2] == '=') decoded--;
+            args.GetReturnValue().Set(v8::Integer::New(p_isolate, decoded));
+            return;
+        }
+        v8::String::Utf8Value str(p_isolate, args[0]);
+        args.GetReturnValue().Set(v8::Integer::New(p_isolate, static_cast<int32_t>(str.length())));
+        return;
+    }
+    if (args[0]->IsArrayBuffer()) {
+        args.GetReturnValue().Set(v8::Integer::New(p_isolate, static_cast<int32_t>(args[0].As<v8::ArrayBuffer>()->ByteLength())));
+        return;
+    }
+    if (args[0]->IsArrayBufferView()) {
+        args.GetReturnValue().Set(v8::Integer::New(p_isolate, static_cast<int32_t>(args[0].As<v8::ArrayBufferView>()->ByteLength())));
+        return;
+    }
+    args.GetReturnValue().Set(v8::Integer::New(p_isolate, 0));
+}
+
+void Buffer::compare(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 2 || !args[0]->IsUint8Array() || !args[1]->IsUint8Array()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "Arguments must be Buffers or Uint8Arrays")));
+        return;
+    }
+    v8::Local<v8::Uint8Array> a = args[0].As<v8::Uint8Array>();
+    v8::Local<v8::Uint8Array> b = args[1].As<v8::Uint8Array>();
+    uint8_t* p_a = static_cast<uint8_t*>(a->Buffer()->GetBackingStore()->Data()) + a->ByteOffset();
+    uint8_t* p_b = static_cast<uint8_t*>(b->Buffer()->GetBackingStore()->Data()) + b->ByteOffset();
+    size_t len = std::min(a->ByteLength(), b->ByteLength());
+    int32_t cmp = len > 0 ? memcmp(p_a, p_b, len) : 0;
+    if (cmp == 0) {
+        if (a->ByteLength() < b->ByteLength()) cmp = -1;
+        else if (a->ByteLength() > b->ByteLength()) cmp = 1;
+    } else {
+        cmp = cmp < 0 ? -1 : 1;
+    }
+    args.GetReturnValue().Set(v8::Integer::New(p_isolate, cmp));
+}
+
+// ---- New instance methods ----
+
+void Buffer::subarray(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    slice(args);
+}
+
+void Buffer::equals(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 1 || !args[0]->IsUint8Array()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "Argument must be a Buffer or Uint8Array")));
+        return;
+    }
+    v8::Local<v8::Uint8Array> self = args.This().As<v8::Uint8Array>();
+    v8::Local<v8::Uint8Array> other = args[0].As<v8::Uint8Array>();
+    if (self->ByteLength() != other->ByteLength()) {
+        args.GetReturnValue().Set(v8::Boolean::New(p_isolate, false));
+        return;
+    }
+    uint8_t* p_self = static_cast<uint8_t*>(self->Buffer()->GetBackingStore()->Data()) + self->ByteOffset();
+    uint8_t* p_other = static_cast<uint8_t*>(other->Buffer()->GetBackingStore()->Data()) + other->ByteOffset();
+    bool eq = (memcmp(p_self, p_other, self->ByteLength()) == 0);
+    args.GetReturnValue().Set(v8::Boolean::New(p_isolate, eq));
+}
+
+void Buffer::compare_instance(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    if (args.Length() < 1 || !args[0]->IsUint8Array()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "Argument must be a Buffer or Uint8Array")));
+        return;
+    }
+    v8::Local<v8::Uint8Array> self = args.This().As<v8::Uint8Array>();
+    v8::Local<v8::Uint8Array> target = args[0].As<v8::Uint8Array>();
+    size_t target_start = 0, target_end = target->ByteLength();
+    size_t source_start = 0, source_end = self->ByteLength();
+    if (args.Length() > 1 && args[1]->IsNumber()) target_start = static_cast<size_t>(args[1]->IntegerValue(context).FromMaybe(0));
+    if (args.Length() > 2 && args[2]->IsNumber()) target_end   = static_cast<size_t>(args[2]->IntegerValue(context).FromMaybe(static_cast<int64_t>(target_end)));
+    if (args.Length() > 3 && args[3]->IsNumber()) source_start = static_cast<size_t>(args[3]->IntegerValue(context).FromMaybe(0));
+    if (args.Length() > 4 && args[4]->IsNumber()) source_end   = static_cast<size_t>(args[4]->IntegerValue(context).FromMaybe(static_cast<int64_t>(source_end)));
+    uint8_t* p_self   = static_cast<uint8_t*>(self->Buffer()->GetBackingStore()->Data())   + self->ByteOffset()   + source_start;
+    uint8_t* p_target = static_cast<uint8_t*>(target->Buffer()->GetBackingStore()->Data()) + target->ByteOffset() + target_start;
+    size_t src_len = source_end > source_start ? source_end - source_start : 0;
+    size_t tgt_len = target_end > target_start ? target_end - target_start : 0;
+    size_t len = std::min(src_len, tgt_len);
+    int32_t cmp = len > 0 ? memcmp(p_self, p_target, len) : 0;
+    if (cmp == 0) {
+        if (src_len < tgt_len) cmp = -1;
+        else if (src_len > tgt_len) cmp = 1;
+    } else {
+        cmp = cmp < 0 ? -1 : 1;
+    }
+    args.GetReturnValue().Set(v8::Integer::New(p_isolate, cmp));
+}
+
+static int64_t bufferIndexOf(uint8_t* p_haystack, size_t hay_len, uint8_t* p_needle, size_t needle_len, int64_t byte_offset, bool reverse) {
+    if (needle_len == 0) return reverse ? static_cast<int64_t>(hay_len) : byte_offset;
+    if (needle_len > hay_len) return -1;
+    if (!reverse) {
+        for (int64_t i = byte_offset; i <= static_cast<int64_t>(hay_len - needle_len); i++) {
+            if (memcmp(p_haystack + i, p_needle, needle_len) == 0) return i;
+        }
+    } else {
+        int64_t start = static_cast<int64_t>(hay_len - needle_len);
+        if (byte_offset < start) start = byte_offset;
+        for (int64_t i = start; i >= 0; i--) {
+            if (memcmp(p_haystack + i, p_needle, needle_len) == 0) return i;
+        }
+    }
+    return -1;
+}
+
+void Buffer::indexOf(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Uint8Array> self = args.This().As<v8::Uint8Array>();
+    uint8_t* p_data = static_cast<uint8_t*>(self->Buffer()->GetBackingStore()->Data()) + self->ByteOffset();
+    size_t buf_len = self->ByteLength();
+    int64_t byte_offset = 0;
+    if (args.Length() > 1 && args[1]->IsNumber()) {
+        byte_offset = args[1]->IntegerValue(context).FromMaybe(0);
+        if (byte_offset < 0) byte_offset = std::max(static_cast<int64_t>(0), static_cast<int64_t>(buf_len) + byte_offset);
+    }
+    int64_t result = -1;
+    if (args.Length() >= 1) {
+        if (args[0]->IsNumber()) {
+            uint8_t val = static_cast<uint8_t>(args[0]->Uint32Value(context).FromMaybe(0));
+            for (int64_t i = byte_offset; i < static_cast<int64_t>(buf_len); i++) {
+                if (p_data[i] == val) { result = i; break; }
+            }
+        } else if (args[0]->IsString()) {
+            v8::String::Utf8Value str(p_isolate, args[0]);
+            result = bufferIndexOf(p_data, buf_len, reinterpret_cast<uint8_t*>(*str), str.length(), byte_offset, false);
+        } else if (args[0]->IsUint8Array()) {
+            v8::Local<v8::Uint8Array> needle = args[0].As<v8::Uint8Array>();
+            uint8_t* p_needle = static_cast<uint8_t*>(needle->Buffer()->GetBackingStore()->Data()) + needle->ByteOffset();
+            result = bufferIndexOf(p_data, buf_len, p_needle, needle->ByteLength(), byte_offset, false);
+        }
+    }
+    args.GetReturnValue().Set(v8::Integer::New(p_isolate, static_cast<int32_t>(result)));
+}
+
+void Buffer::lastIndexOf(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Uint8Array> self = args.This().As<v8::Uint8Array>();
+    uint8_t* p_data = static_cast<uint8_t*>(self->Buffer()->GetBackingStore()->Data()) + self->ByteOffset();
+    size_t buf_len = self->ByteLength();
+    int64_t byte_offset = static_cast<int64_t>(buf_len) - 1;
+    if (args.Length() > 1 && args[1]->IsNumber()) {
+        byte_offset = args[1]->IntegerValue(context).FromMaybe(0);
+        if (byte_offset < 0) byte_offset = static_cast<int64_t>(buf_len) + byte_offset;
+    }
+    int64_t result = -1;
+    if (args.Length() >= 1) {
+        if (args[0]->IsNumber()) {
+            uint8_t val = static_cast<uint8_t>(args[0]->Uint32Value(context).FromMaybe(0));
+            for (int64_t i = std::min(byte_offset, static_cast<int64_t>(buf_len) - 1); i >= 0; i--) {
+                if (p_data[i] == val) { result = i; break; }
+            }
+        } else if (args[0]->IsString()) {
+            v8::String::Utf8Value str(p_isolate, args[0]);
+            result = bufferIndexOf(p_data, buf_len, reinterpret_cast<uint8_t*>(*str), str.length(), byte_offset, true);
+        } else if (args[0]->IsUint8Array()) {
+            v8::Local<v8::Uint8Array> needle = args[0].As<v8::Uint8Array>();
+            uint8_t* p_needle = static_cast<uint8_t*>(needle->Buffer()->GetBackingStore()->Data()) + needle->ByteOffset();
+            result = bufferIndexOf(p_data, buf_len, p_needle, needle->ByteLength(), byte_offset, true);
+        }
+    }
+    args.GetReturnValue().Set(v8::Integer::New(p_isolate, static_cast<int32_t>(result)));
+}
+
+void Buffer::includes(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    indexOf(args);
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Value> idx_val = args.GetReturnValue().Get();
+    int32_t idx = idx_val->Int32Value(p_isolate->GetCurrentContext()).FromMaybe(-1);
+    args.GetReturnValue().Set(v8::Boolean::New(p_isolate, idx >= 0));
+}
+
+void Buffer::toJSON(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Uint8Array> self = args.This().As<v8::Uint8Array>();
+    uint8_t* p_data = static_cast<uint8_t*>(self->Buffer()->GetBackingStore()->Data()) + self->ByteOffset();
+    size_t len = self->ByteLength();
+    v8::Local<v8::Array> data_arr = v8::Array::New(p_isolate, static_cast<int32_t>(len));
+    for (size_t i = 0; i < len; i++) {
+        data_arr->Set(context, static_cast<uint32_t>(i), v8::Integer::New(p_isolate, p_data[i])).Check();
+    }
+    v8::Local<v8::Object> obj = v8::Object::New(p_isolate);
+    obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "type"), v8::String::NewFromUtf8Literal(p_isolate, "Buffer")).Check();
+    obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "data"), data_arr).Check();
+    args.GetReturnValue().Set(obj);
+}
+
+void Buffer::swap16(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Uint8Array> self = args.This().As<v8::Uint8Array>();
+    size_t len = self->ByteLength();
+    if (len % 2 != 0) {
+        p_isolate->ThrowException(v8::Exception::RangeError(v8::String::NewFromUtf8Literal(p_isolate, "Buffer size must be a multiple of 16-bits")));
+        return;
+    }
+    uint8_t* p_data = static_cast<uint8_t*>(self->Buffer()->GetBackingStore()->Data()) + self->ByteOffset();
+    for (size_t i = 0; i < len; i += 2) {
+        uint8_t tmp = p_data[i]; p_data[i] = p_data[i + 1]; p_data[i + 1] = tmp;
+    }
+    args.GetReturnValue().Set(args.This());
+}
+
+void Buffer::swap32(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Uint8Array> self = args.This().As<v8::Uint8Array>();
+    size_t len = self->ByteLength();
+    if (len % 4 != 0) {
+        p_isolate->ThrowException(v8::Exception::RangeError(v8::String::NewFromUtf8Literal(p_isolate, "Buffer size must be a multiple of 32-bits")));
+        return;
+    }
+    uint8_t* p_data = static_cast<uint8_t*>(self->Buffer()->GetBackingStore()->Data()) + self->ByteOffset();
+    for (size_t i = 0; i < len; i += 4) {
+        uint8_t a = p_data[i], b = p_data[i+1], c = p_data[i+2], d = p_data[i+3];
+        p_data[i] = d; p_data[i+1] = c; p_data[i+2] = b; p_data[i+3] = a;
+    }
+    args.GetReturnValue().Set(args.This());
+}
+
+void Buffer::swap64(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Uint8Array> self = args.This().As<v8::Uint8Array>();
+    size_t len = self->ByteLength();
+    if (len % 8 != 0) {
+        p_isolate->ThrowException(v8::Exception::RangeError(v8::String::NewFromUtf8Literal(p_isolate, "Buffer size must be a multiple of 64-bits")));
+        return;
+    }
+    uint8_t* p_data = static_cast<uint8_t*>(self->Buffer()->GetBackingStore()->Data()) + self->ByteOffset();
+    for (size_t i = 0; i < len; i += 8) {
+        for (size_t j = 0; j < 4; j++) {
+            uint8_t tmp = p_data[i + j]; p_data[i + j] = p_data[i + 7 - j]; p_data[i + 7 - j] = tmp;
+        }
+    }
+    args.GetReturnValue().Set(args.This());
+}
+
+// ---- Read numeric helpers ----
+static uint8_t* getBufData(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Uint8Array> self = args.This().As<v8::Uint8Array>();
+    return static_cast<uint8_t*>(self->Buffer()->GetBackingStore()->Data()) + self->ByteOffset();
+}
+static size_t getOffset(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() > 0 && args[0]->IsNumber()) {
+        return static_cast<size_t>(args[0]->IntegerValue(args.GetIsolate()->GetCurrentContext()).FromMaybe(0));
+    }
+    return 0;
+}
+
+#define CHECK_OFFSET(off, n, len) do { \
+    if ((off) + (n) > (len)) { \
+        args.GetIsolate()->ThrowException(v8::Exception::RangeError(v8::String::NewFromUtf8Literal(args.GetIsolate(), "Attempt to access memory outside buffer bounds"))); \
+        return; \
+    } \
+} while (0)
+
+void Buffer::readUInt8(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 1, len);
+    args.GetReturnValue().Set(v8::Integer::NewFromUnsigned(args.GetIsolate(), p[off]));
+}
+void Buffer::readInt8(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 1, len);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int8_t>(p[off])));
+}
+void Buffer::readUInt16BE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 2, len);
+    uint32_t val = (static_cast<uint32_t>(p[off]) << 8) | p[off+1];
+    args.GetReturnValue().Set(v8::Integer::NewFromUnsigned(args.GetIsolate(), val));
+}
+void Buffer::readUInt16LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 2, len);
+    uint32_t val = (static_cast<uint32_t>(p[off+1]) << 8) | p[off];
+    args.GetReturnValue().Set(v8::Integer::NewFromUnsigned(args.GetIsolate(), val));
+}
+void Buffer::readInt16BE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 2, len);
+    int16_t val = static_cast<int16_t>((static_cast<uint32_t>(p[off]) << 8) | p[off+1]);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), val));
+}
+void Buffer::readInt16LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 2, len);
+    int16_t val = static_cast<int16_t>((static_cast<uint32_t>(p[off+1]) << 8) | p[off]);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), val));
+}
+void Buffer::readUInt32BE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 4, len);
+    uint32_t val = (static_cast<uint32_t>(p[off])<<24)|(static_cast<uint32_t>(p[off+1])<<16)|(static_cast<uint32_t>(p[off+2])<<8)|p[off+3];
+    args.GetReturnValue().Set(v8::Integer::NewFromUnsigned(args.GetIsolate(), val));
+}
+void Buffer::readUInt32LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 4, len);
+    uint32_t val = (static_cast<uint32_t>(p[off+3])<<24)|(static_cast<uint32_t>(p[off+2])<<16)|(static_cast<uint32_t>(p[off+1])<<8)|p[off];
+    args.GetReturnValue().Set(v8::Integer::NewFromUnsigned(args.GetIsolate(), val));
+}
+void Buffer::readInt32BE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 4, len);
+    int32_t val = static_cast<int32_t>((static_cast<uint32_t>(p[off])<<24)|(static_cast<uint32_t>(p[off+1])<<16)|(static_cast<uint32_t>(p[off+2])<<8)|p[off+3]);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), val));
+}
+void Buffer::readInt32LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 4, len);
+    int32_t val = static_cast<int32_t>((static_cast<uint32_t>(p[off+3])<<24)|(static_cast<uint32_t>(p[off+2])<<16)|(static_cast<uint32_t>(p[off+1])<<8)|p[off]);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), val));
+}
+void Buffer::readFloatBE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 4, len);
+    uint32_t raw = (static_cast<uint32_t>(p[off])<<24)|(static_cast<uint32_t>(p[off+1])<<16)|(static_cast<uint32_t>(p[off+2])<<8)|p[off+3];
+    float val; memcpy(&val, &raw, 4);
+    args.GetReturnValue().Set(v8::Number::New(args.GetIsolate(), static_cast<double>(val)));
+}
+void Buffer::readFloatLE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 4, len);
+    float val; memcpy(&val, p + off, 4);
+    args.GetReturnValue().Set(v8::Number::New(args.GetIsolate(), static_cast<double>(val)));
+}
+void Buffer::readDoubleBE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 8, len);
+    uint8_t tmp[8];
+    for (int32_t i = 0; i < 8; i++) tmp[i] = p[off + 7 - i];
+    double val; memcpy(&val, tmp, 8);
+    args.GetReturnValue().Set(v8::Number::New(args.GetIsolate(), val));
+}
+void Buffer::readDoubleLE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 8, len);
+    double val; memcpy(&val, p + off, 8);
+    args.GetReturnValue().Set(v8::Number::New(args.GetIsolate(), val));
+}
+void Buffer::readBigInt64BE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 8, len);
+    int64_t val = 0;
+    for (int32_t i = 0; i < 8; i++) val = (val << 8) | p[off + i];
+    args.GetReturnValue().Set(v8::BigInt::New(p_isolate, val));
+}
+void Buffer::readBigInt64LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 8, len);
+    int64_t val = 0;
+    for (int32_t i = 7; i >= 0; i--) val = (val << 8) | p[off + i];
+    args.GetReturnValue().Set(v8::BigInt::New(p_isolate, val));
+}
+void Buffer::readBigUInt64BE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 8, len);
+    uint64_t val = 0;
+    for (int32_t i = 0; i < 8; i++) val = (val << 8) | p[off + i];
+    args.GetReturnValue().Set(v8::BigInt::NewFromUnsigned(p_isolate, val));
+}
+void Buffer::readBigUInt64LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    uint8_t* p = getBufData(args); size_t off = getOffset(args);
+    size_t len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, 8, len);
+    uint64_t val = 0;
+    for (int32_t i = 7; i >= 0; i--) val = (val << 8) | p[off + i];
+    args.GetReturnValue().Set(v8::BigInt::NewFromUnsigned(p_isolate, val));
+}
+
+// ---- Write numeric methods ----
+#define GET_WRITE_OFFSET(args, n) \
+    size_t off = 0; \
+    if (args.Length() > 1 && args[1]->IsNumber()) off = static_cast<size_t>(args[1]->IntegerValue(args.GetIsolate()->GetCurrentContext()).FromMaybe(0)); \
+    size_t buf_len_w = args.This().As<v8::Uint8Array>()->ByteLength(); \
+    CHECK_OFFSET(off, n, buf_len_w); \
+    uint8_t* p_w = getBufData(args);
+
+void Buffer::writeUInt8(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 1);
+    p_w[off] = static_cast<uint8_t>(args[0]->Uint32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(0));
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 1)));
+}
+void Buffer::writeInt8(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 1);
+    p_w[off] = static_cast<uint8_t>(static_cast<int8_t>(args[0]->Int32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(0)));
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 1)));
+}
+void Buffer::writeUInt16BE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 2);
+    uint32_t val = args[0]->Uint32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(0);
+    p_w[off] = static_cast<uint8_t>(val >> 8); p_w[off+1] = static_cast<uint8_t>(val);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 2)));
+}
+void Buffer::writeUInt16LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 2);
+    uint32_t val = args[0]->Uint32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(0);
+    p_w[off] = static_cast<uint8_t>(val); p_w[off+1] = static_cast<uint8_t>(val >> 8);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 2)));
+}
+void Buffer::writeInt16BE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 2);
+    uint32_t val = static_cast<uint32_t>(args[0]->Int32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(0));
+    p_w[off] = static_cast<uint8_t>(val >> 8); p_w[off+1] = static_cast<uint8_t>(val);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 2)));
+}
+void Buffer::writeInt16LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 2);
+    uint32_t val = static_cast<uint32_t>(args[0]->Int32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(0));
+    p_w[off] = static_cast<uint8_t>(val); p_w[off+1] = static_cast<uint8_t>(val >> 8);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 2)));
+}
+void Buffer::writeUInt32BE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 4);
+    uint32_t val = args[0]->Uint32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(0);
+    p_w[off]=static_cast<uint8_t>(val>>24); p_w[off+1]=static_cast<uint8_t>(val>>16);
+    p_w[off+2]=static_cast<uint8_t>(val>>8); p_w[off+3]=static_cast<uint8_t>(val);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 4)));
+}
+void Buffer::writeUInt32LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 4);
+    uint32_t val = args[0]->Uint32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(0);
+    p_w[off]=static_cast<uint8_t>(val); p_w[off+1]=static_cast<uint8_t>(val>>8);
+    p_w[off+2]=static_cast<uint8_t>(val>>16); p_w[off+3]=static_cast<uint8_t>(val>>24);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 4)));
+}
+void Buffer::writeInt32BE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 4);
+    uint32_t val = static_cast<uint32_t>(args[0]->Int32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(0));
+    p_w[off]=static_cast<uint8_t>(val>>24); p_w[off+1]=static_cast<uint8_t>(val>>16);
+    p_w[off+2]=static_cast<uint8_t>(val>>8); p_w[off+3]=static_cast<uint8_t>(val);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 4)));
+}
+void Buffer::writeInt32LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 4);
+    uint32_t val = static_cast<uint32_t>(args[0]->Int32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(0));
+    p_w[off]=static_cast<uint8_t>(val); p_w[off+1]=static_cast<uint8_t>(val>>8);
+    p_w[off+2]=static_cast<uint8_t>(val>>16); p_w[off+3]=static_cast<uint8_t>(val>>24);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 4)));
+}
+void Buffer::writeFloatBE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 4);
+    float val = static_cast<float>(args[0]->NumberValue(args.GetIsolate()->GetCurrentContext()).FromMaybe(0.0));
+    uint32_t raw; memcpy(&raw, &val, 4);
+    p_w[off]=static_cast<uint8_t>(raw>>24); p_w[off+1]=static_cast<uint8_t>(raw>>16);
+    p_w[off+2]=static_cast<uint8_t>(raw>>8); p_w[off+3]=static_cast<uint8_t>(raw);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 4)));
+}
+void Buffer::writeFloatLE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 4);
+    float val = static_cast<float>(args[0]->NumberValue(args.GetIsolate()->GetCurrentContext()).FromMaybe(0.0));
+    memcpy(p_w + off, &val, 4);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 4)));
+}
+void Buffer::writeDoubleBE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 8);
+    double val = args[0]->NumberValue(args.GetIsolate()->GetCurrentContext()).FromMaybe(0.0);
+    uint8_t tmp[8]; memcpy(tmp, &val, 8);
+    for (int32_t i = 0; i < 8; i++) p_w[off + i] = tmp[7 - i];
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 8)));
+}
+void Buffer::writeDoubleLE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1) return;
+    GET_WRITE_OFFSET(args, 8);
+    double val = args[0]->NumberValue(args.GetIsolate()->GetCurrentContext()).FromMaybe(0.0);
+    memcpy(p_w + off, &val, 8);
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 8)));
+}
+void Buffer::writeBigInt64BE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1 || !args[0]->IsBigInt()) return;
+    GET_WRITE_OFFSET(args, 8);
+    int64_t val = args[0].As<v8::BigInt>()->Int64Value();
+    for (int32_t i = 7; i >= 0; i--) { p_w[off + i] = static_cast<uint8_t>(val & 0xff); val >>= 8; }
+    // fix order for BE
+    uint8_t tmp[8]; memcpy(tmp, p_w + off, 8);
+    for (int32_t i = 0; i < 8; i++) p_w[off + i] = tmp[7 - i];
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 8)));
+}
+void Buffer::writeBigInt64LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1 || !args[0]->IsBigInt()) return;
+    GET_WRITE_OFFSET(args, 8);
+    int64_t val = args[0].As<v8::BigInt>()->Int64Value();
+    for (int32_t i = 0; i < 8; i++) { p_w[off + i] = static_cast<uint8_t>(val & 0xff); val >>= 8; }
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 8)));
+}
+void Buffer::writeBigUInt64BE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1 || !args[0]->IsBigInt()) return;
+    GET_WRITE_OFFSET(args, 8);
+    uint64_t val = args[0].As<v8::BigInt>()->Uint64Value();
+    for (int32_t i = 0; i < 8; i++) { p_w[off + i] = static_cast<uint8_t>((val >> (56 - i*8)) & 0xff); }
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 8)));
+}
+void Buffer::writeBigUInt64LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1 || !args[0]->IsBigInt()) return;
+    GET_WRITE_OFFSET(args, 8);
+    uint64_t val = args[0].As<v8::BigInt>()->Uint64Value();
+    for (int32_t i = 0; i < 8; i++) { p_w[off + i] = static_cast<uint8_t>(val & 0xff); val >>= 8; }
+    args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 8)));
+}
+
 } // namespace module
 } // namespace z8
+
