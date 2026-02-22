@@ -21,6 +21,8 @@ struct ZlibAsyncCtx {
     int32_t m_window_bits = 15;
     int32_t m_mem_level = 8;
     int32_t m_strategy = Z_DEFAULT_STRATEGY;
+    int32_t m_chunk_size = 16384;
+    std::vector<uint8_t> m_dictionary;
     bool m_is_deflate;
     bool m_is_brotli = false;
     bool m_is_error = false;
@@ -37,7 +39,8 @@ struct ZlibAsyncCtx {
 };
 
 static void parseZlibOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> context, v8::Local<v8::Value> options_val,
-                             int32_t& level, int32_t& window_bits, int32_t& mem_level, int32_t& strategy) {
+                             int32_t& level, int32_t& window_bits, int32_t& mem_level, int32_t& strategy,
+                             int32_t& chunk_size, std::vector<uint8_t>& dictionary) {
     if (options_val.IsEmpty() || !options_val->IsObject()) {
         return;
     }
@@ -54,6 +57,16 @@ static void parseZlibOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> cont
     }
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "strategy")).ToLocal(&val) && val->IsNumber()) {
         strategy = val->Int32Value(context).FromMaybe(strategy);
+    }
+    if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "chunkSize")).ToLocal(&val) && val->IsNumber()) {
+        chunk_size = val->Int32Value(context).FromMaybe(chunk_size);
+    }
+    if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "dictionary")).ToLocal(&val)) {
+        if (val->IsUint8Array()) {
+            v8::Local<v8::Uint8Array> dict = val.As<v8::Uint8Array>();
+            dictionary.assign(static_cast<uint8_t*>(dict->Buffer()->GetBackingStore()->Data()) + dict->ByteOffset(),
+                              static_cast<uint8_t*>(dict->Buffer()->GetBackingStore()->Data()) + dict->ByteOffset() + dict->ByteLength());
+        }
     }
 }
 
@@ -144,6 +157,14 @@ v8::Local<v8::ObjectTemplate> Zlib::createTemplate(v8::Isolate* p_isolate) {
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_BLOCK"), v8::Number::New(p_isolate, (double)Z_BLOCK));
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_TREES"), v8::Number::New(p_isolate, (double)Z_TREES));
 
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_MIN_LEVEL"), v8::Number::New(p_isolate, (double)-1));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_MAX_LEVEL"), v8::Number::New(p_isolate, (double)9));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_MIN_MEMLEVEL"), v8::Number::New(p_isolate, (double)1));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_MAX_MEMLEVEL"), v8::Number::New(p_isolate, (double)9));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_MIN_WINDOWBITS"), v8::Number::New(p_isolate, (double)8));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_MAX_WINDOWBITS"), v8::Number::New(p_isolate, (double)15));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_MIN_CHUNK"), v8::Number::New(p_isolate, (double)64));
+
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_OK"), v8::Number::New(p_isolate, (double)Z_OK));
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_STREAM_END"), v8::Number::New(p_isolate, (double)Z_STREAM_END));
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_NEED_DICT"), v8::Number::New(p_isolate, (double)Z_NEED_DICT));
@@ -157,6 +178,14 @@ v8::Local<v8::ObjectTemplate> Zlib::createTemplate(v8::Isolate* p_isolate) {
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_PARAM_MODE"), v8::Number::New(p_isolate, (double)BROTLI_PARAM_MODE));
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_PARAM_QUALITY"), v8::Number::New(p_isolate, (double)BROTLI_PARAM_QUALITY));
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_PARAM_LGWIN"), v8::Number::New(p_isolate, (double)BROTLI_PARAM_LGWIN));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_PARAM_LGBLOCK"), v8::Number::New(p_isolate, (double)BROTLI_PARAM_LGBLOCK));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_PARAM_DISABLE_LITERAL_CONTEXT_MODELING"), v8::Number::New(p_isolate, (double)BROTLI_PARAM_DISABLE_LITERAL_CONTEXT_MODELING));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_PARAM_SIZE_HINT"), v8::Number::New(p_isolate, (double)BROTLI_PARAM_SIZE_HINT));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_PARAM_LARGE_WINDOW"), v8::Number::New(p_isolate, (double)BROTLI_PARAM_LARGE_WINDOW));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_PARAM_NPOSTFIX"), v8::Number::New(p_isolate, (double)BROTLI_PARAM_NPOSTFIX));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_PARAM_NDIRECT"), v8::Number::New(p_isolate, (double)BROTLI_PARAM_NDIRECT));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_PARAM_STREAM_OFFSET"), v8::Number::New(p_isolate, (double)BROTLI_PARAM_STREAM_OFFSET));
+
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_MODE_GENERIC"), v8::Number::New(p_isolate, (double)BROTLI_MODE_GENERIC));
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_MODE_TEXT"), v8::Number::New(p_isolate, (double)BROTLI_MODE_TEXT));
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_MODE_FONT"), v8::Number::New(p_isolate, (double)BROTLI_MODE_FONT));
@@ -164,10 +193,28 @@ v8::Local<v8::ObjectTemplate> Zlib::createTemplate(v8::Isolate* p_isolate) {
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_DEFAULT_WINDOW"), v8::Number::New(p_isolate, (double)BROTLI_DEFAULT_WINDOW));
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_MIN_QUALITY"), v8::Number::New(p_isolate, (double)BROTLI_MIN_QUALITY));
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_MAX_QUALITY"), v8::Number::New(p_isolate, (double)BROTLI_MAX_QUALITY));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_MIN_WINDOW_BITS"), v8::Number::New(p_isolate, (double)BROTLI_MIN_WINDOW_BITS));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_MAX_WINDOW_BITS"), v8::Number::New(p_isolate, (double)BROTLI_MAX_WINDOW_BITS));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_LARGE_MAX_WINDOW_BITS"), v8::Number::New(p_isolate, (double)BROTLI_LARGE_MAX_WINDOW_BITS));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_MIN_INPUT_BLOCK_BITS"), v8::Number::New(p_isolate, (double)BROTLI_MIN_INPUT_BLOCK_BITS));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_MAX_INPUT_BLOCK_BITS"), v8::Number::New(p_isolate, (double)BROTLI_MAX_INPUT_BLOCK_BITS));
 
-    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZSTD_CLEVEL_DEFAULT"), v8::Number::New(p_isolate, (double)3));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_DECODER_PARAM_DISABLE_RING_BUFFER_REALLOCATION"), v8::Number::New(p_isolate, (double)BROTLI_DECODER_PARAM_DISABLE_RING_BUFFER_REALLOCATION));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_DECODER_PARAM_LARGE_WINDOW"), v8::Number::New(p_isolate, (double)BROTLI_DECODER_PARAM_LARGE_WINDOW));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_DECODER_RESULT_ERROR"), v8::Number::New(p_isolate, (double)BROTLI_DECODER_RESULT_ERROR));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_DECODER_RESULT_SUCCESS"), v8::Number::New(p_isolate, (double)BROTLI_DECODER_RESULT_SUCCESS));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT"), v8::Number::New(p_isolate, (double)BROTLI_DECODER_RESULT_NEEDS_MORE_INPUT));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT"), v8::Number::New(p_isolate, (double)BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT));
+
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZSTD_CLEVEL_DEFAULT"), v8::Number::New(p_isolate, (double)ZSTD_CLEVEL_DEFAULT));
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZSTD_CLEVEL_MIN"), v8::Number::New(p_isolate, (double)-22));
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZSTD_CLEVEL_MAX"), v8::Number::New(p_isolate, (double)22));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZSTD_e_continue"), v8::Number::New(p_isolate, (double)ZSTD_e_continue));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZSTD_e_flush"), v8::Number::New(p_isolate, (double)ZSTD_e_flush));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZSTD_e_end"), v8::Number::New(p_isolate, (double)ZSTD_e_end));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZSTD_c_compressionLevel"), v8::Number::New(p_isolate, (double)ZSTD_c_compressionLevel));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZSTD_c_checksumFlag"), v8::Number::New(p_isolate, (double)ZSTD_c_checksumFlag));
+    constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZSTD_c_dictIDFlag"), v8::Number::New(p_isolate, (double)ZSTD_c_dictIDFlag));
 
     v8::Local<v8::ObjectTemplate> codes = v8::ObjectTemplate::New(p_isolate);
     codes->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_OK"), v8::Number::New(p_isolate, (double)Z_OK));
@@ -196,32 +243,43 @@ v8::Local<v8::ObjectTemplate> Zlib::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "crc32"), v8::FunctionTemplate::New(p_isolate, crc32));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "adler32"), v8::FunctionTemplate::New(p_isolate, adler32));
 
+    v8::Local<v8::FunctionTemplate> ft_zlib_base = v8::FunctionTemplate::New(p_isolate);
+    ft_zlib_base->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "Zlib"));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Zlib"), ft_zlib_base);
+
     // Register classes as constructors (aliases to create functions for now)
     v8::Local<v8::FunctionTemplate> ft_gzip = v8::FunctionTemplate::New(p_isolate, createGzip);
+    ft_gzip->Inherit(ft_zlib_base);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Gzip"), ft_gzip);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createGzip"), ft_gzip);
 
     v8::Local<v8::FunctionTemplate> ft_gunzip = v8::FunctionTemplate::New(p_isolate, createGunzip);
+    ft_gunzip->Inherit(ft_zlib_base);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Gunzip"), ft_gunzip);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createGunzip"), ft_gunzip);
 
     v8::Local<v8::FunctionTemplate> ft_deflate = v8::FunctionTemplate::New(p_isolate, createDeflate);
+    ft_deflate->Inherit(ft_zlib_base);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Deflate"), ft_deflate);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createDeflate"), ft_deflate);
 
     v8::Local<v8::FunctionTemplate> ft_inflate = v8::FunctionTemplate::New(p_isolate, createInflate);
+    ft_inflate->Inherit(ft_zlib_base);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Inflate"), ft_inflate);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createInflate"), ft_inflate);
 
     v8::Local<v8::FunctionTemplate> ft_deflate_raw = v8::FunctionTemplate::New(p_isolate, createDeflateRaw);
+    ft_deflate_raw->Inherit(ft_zlib_base);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "DeflateRaw"), ft_deflate_raw);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createDeflateRaw"), ft_deflate_raw);
 
     v8::Local<v8::FunctionTemplate> ft_inflate_raw = v8::FunctionTemplate::New(p_isolate, createInflateRaw);
+    ft_inflate_raw->Inherit(ft_zlib_base);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "InflateRaw"), ft_inflate_raw);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createInflateRaw"), ft_inflate_raw);
 
     v8::Local<v8::FunctionTemplate> ft_unzip = v8::FunctionTemplate::New(p_isolate, createUnzip);
+    ft_unzip->Inherit(ft_zlib_base);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Unzip"), ft_unzip);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createUnzip"), ft_unzip);
 
@@ -285,9 +343,11 @@ static void doDeflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
     int32_t window_bits = default_window_bits;
     int32_t mem_level = 8;
     int32_t strategy = Z_DEFAULT_STRATEGY;
+    int32_t chunk_size = 16384;
+    std::vector<uint8_t> dictionary;
 
     if (args.Length() >= 2) {
-        parseZlibOptions(p_isolate, context, args[1], level, window_bits, mem_level, strategy);
+        parseZlibOptions(p_isolate, context, args[1], level, window_bits, mem_level, strategy, chunk_size, dictionary);
     }
 
     z_stream strm;
@@ -300,10 +360,13 @@ static void doDeflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
         return;
     }
 
+    if (!dictionary.empty()) {
+        deflateSetDictionary(&strm, (const Bytef*)dictionary.data(), (uInt)dictionary.size());
+    }
+
     strm.next_in = (Bytef*)p_data;
     strm.avail_in = (uInt)length;
     std::vector<uint8_t> out_buffer;
-    const size_t chunk_size = 16384;
     out_buffer.resize(chunk_size);
     int32_t ret;
     size_t total_out = 0;
@@ -341,9 +404,11 @@ static void doInflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
     int32_t window_bits = default_window_bits;
     int32_t mem_level = 8;
     int32_t strategy = Z_DEFAULT_STRATEGY;
+    int32_t chunk_size = 16384;
+    std::vector<uint8_t> dictionary;
 
     if (args.Length() >= 2) {
-        parseZlibOptions(p_isolate, context, args[1], level, window_bits, mem_level, strategy);
+        parseZlibOptions(p_isolate, context, args[1], level, window_bits, mem_level, strategy, chunk_size, dictionary);
     }
 
     z_stream strm;
@@ -358,7 +423,6 @@ static void doInflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
         return;
     }
     std::vector<uint8_t> out_buffer;
-    const size_t chunk_size = 16384;
     out_buffer.resize(chunk_size);
     int32_t ret;
     size_t total_out = 0;
@@ -372,6 +436,13 @@ static void doInflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
         ret = inflate(&strm, Z_NO_FLUSH);
         total_out += chunk_size - strm.avail_out;
         
+        if (ret == Z_NEED_DICT) {
+            if (!dictionary.empty()) {
+                ret = inflateSetDictionary(&strm, (const Bytef*)dictionary.data(), (uInt)dictionary.size());
+                if (ret == Z_OK) continue;
+            }
+        }
+
         if (ret == Z_NEED_DICT || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR) {
             inflateEnd(&strm);
             p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "inflate failed")));
@@ -423,7 +494,7 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
         } else if (is_zstd) {
             parseZstdOptions(p_isolate, context, args[1], p_ctx->m_zstd_level);
         } else {
-            parseZlibOptions(p_isolate, context, args[1], p_ctx->m_level, p_ctx->m_window_bits, p_ctx->m_mem_level, p_ctx->m_strategy);
+            parseZlibOptions(p_isolate, context, args[1], p_ctx->m_level, p_ctx->m_window_bits, p_ctx->m_mem_level, p_ctx->m_strategy, p_ctx->m_chunk_size, p_ctx->m_dictionary);
         }
     }
 
@@ -560,6 +631,9 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
             int32_t ret;
             if (p_ctx->m_is_deflate) {
                 ret = deflateInit2(&strm, p_ctx->m_level, Z_DEFLATED, p_ctx->m_window_bits, p_ctx->m_mem_level, p_ctx->m_strategy);
+                if (ret == Z_OK && !p_ctx->m_dictionary.empty()) {
+                    deflateSetDictionary(&strm, (const Bytef*)p_ctx->m_dictionary.data(), (uInt)p_ctx->m_dictionary.size());
+                }
             } else {
                 ret = inflateInit2(&strm, p_ctx->m_window_bits);
             }
@@ -573,8 +647,8 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
 
             strm.next_in = (Bytef*)p_ctx->m_input.data();
             strm.avail_in = (uInt)p_ctx->m_input.size();
-
-            const size_t chunk_size = 16384;
+            
+            size_t chunk_size = p_ctx->m_chunk_size;
             p_ctx->m_output.resize(chunk_size);
             size_t total_out = 0;
 
@@ -592,7 +666,14 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
                 }
                 total_out += chunk_size - strm.avail_out;
 
-                if (ret == Z_NEED_DICT || ret == Z_DATA_ERROR || ret == Z_MEM_ERROR) {
+                if (ret == Z_NEED_DICT) {
+                    if (!p_ctx->m_dictionary.empty()) {
+                        ret = inflateSetDictionary(&strm, (const Bytef*)p_ctx->m_dictionary.data(), (uInt)p_ctx->m_dictionary.size());
+                        if (ret == Z_OK) continue;
+                    }
+                    break;
+                }
+                if (ret == Z_DATA_ERROR || ret == Z_MEM_ERROR) {
                     break;
                 }
             } while (ret != Z_STREAM_END && (p_ctx->m_is_deflate ? (ret == Z_OK) : true));
@@ -667,6 +748,14 @@ void Zlib::zstdCompress(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 void Zlib::zstdDecompress(const v8::FunctionCallbackInfo<v8::Value>& args) {
     doZlibAsync(args, 0, false, false, false, true);
+}
+
+void Zlib::zstdCompressPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    doZlibAsync(args, 0, true, true, false, true);
+}
+
+void Zlib::zstdDecompressPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    doZlibAsync(args, 0, false, true, false, true);
 }
 
 void Zlib::brotliCompressSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -842,6 +931,9 @@ struct ZlibStreamObject {
     bool m_is_deflate;
     bool m_initialized = false;
     bool m_finished = false;
+    int32_t m_chunk_size = 16384;
+    std::vector<uint8_t> m_dictionary;
+    int32_t m_window_bits;
 
     ZlibStreamObject() {
         memset(&m_strm, 0, sizeof(m_strm));
@@ -874,7 +966,7 @@ static void streamProcess(const v8::FunctionCallbackInfo<v8::Value>& args, int32
     p_obj->m_strm.next_in = (Bytef*)p_data;
     p_obj->m_strm.avail_in = (uInt)length;
     std::vector<uint8_t> out_buffer;
-    const size_t chunk_size = 16384;
+    const size_t chunk_size = p_obj->m_chunk_size;
     out_buffer.resize(chunk_size);
     int32_t ret;
     size_t total_out = 0;
@@ -889,6 +981,12 @@ static void streamProcess(const v8::FunctionCallbackInfo<v8::Value>& args, int32
             ret = deflate(&p_obj->m_strm, flush);
         } else {
             ret = inflate(&p_obj->m_strm, flush);
+            if (ret == Z_NEED_DICT && !p_obj->m_dictionary.empty()) {
+                ret = inflateSetDictionary(&p_obj->m_strm, (const Bytef*)p_obj->m_dictionary.data(), (uInt)p_obj->m_dictionary.size());
+                if (ret == Z_OK) {
+                    ret = inflate(&p_obj->m_strm, flush);
+                }
+            }
         }
         total_out += chunk_size - p_obj->m_strm.avail_out;
     } while (p_obj->m_strm.avail_out == 0 && ret == Z_OK);
@@ -919,6 +1017,57 @@ static void streamEnd(const v8::FunctionCallbackInfo<v8::Value>& args) {
     streamProcess(args, Z_FINISH);
 }
 
+static void streamClose(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::Data> internal_data = self->GetInternalField(0);
+    if (internal_data.IsEmpty() || !internal_data.As<v8::Value>()->IsExternal()) return;
+    ZlibStreamObject* p_obj = static_cast<ZlibStreamObject*>(internal_data.As<v8::External>()->Value());
+    if (p_obj->m_initialized) {
+        if (p_obj->m_is_deflate) {
+            deflateEnd(&p_obj->m_strm);
+        } else {
+            inflateEnd(&p_obj->m_strm);
+        }
+        p_obj->m_initialized = false;
+    }
+}
+
+static void streamReset(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::Data> internal_data = self->GetInternalField(0);
+    if (internal_data.IsEmpty() || !internal_data.As<v8::Value>()->IsExternal()) return;
+    ZlibStreamObject* p_obj = static_cast<ZlibStreamObject*>(internal_data.As<v8::External>()->Value());
+    if (p_obj->m_initialized) {
+        if (p_obj->m_is_deflate) {
+            deflateReset(&p_obj->m_strm);
+        } else {
+            inflateReset(&p_obj->m_strm);
+        }
+        p_obj->m_finished = false;
+    }
+}
+
+static void streamParams(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::Data> internal_data = self->GetInternalField(0);
+    if (internal_data.IsEmpty() || !internal_data.As<v8::Value>()->IsExternal()) return;
+    ZlibStreamObject* p_obj = static_cast<ZlibStreamObject*>(internal_data.As<v8::External>()->Value());
+    
+    if (p_obj->m_initialized && p_obj->m_is_deflate) {
+        int32_t level = Z_DEFAULT_COMPRESSION;
+        int32_t strategy = Z_DEFAULT_STRATEGY;
+        if (args.Length() >= 1 && args[0]->IsNumber()) {
+            level = args[0]->Int32Value(context).FromMaybe(level);
+        }
+        if (args.Length() >= 2 && args[1]->IsNumber()) {
+            strategy = args[1]->Int32Value(context).FromMaybe(strategy);
+        }
+        deflateParams(&p_obj->m_strm, level, strategy);
+    }
+}
+
 static void createZlibStream(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t default_window_bits, bool is_deflate, v8::Local<v8::Value> options_val) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
@@ -927,15 +1076,23 @@ static void createZlibStream(const v8::FunctionCallbackInfo<v8::Value>& args, in
     int32_t window_bits = default_window_bits;
     int32_t mem_level = 8;
     int32_t strategy = Z_DEFAULT_STRATEGY;
+    int32_t chunk_size = 16384;
+    std::vector<uint8_t> dictionary;
 
-    parseZlibOptions(p_isolate, context, options_val, level, window_bits, mem_level, strategy);
+    parseZlibOptions(p_isolate, context, options_val, level, window_bits, mem_level, strategy, chunk_size, dictionary);
 
     ZlibStreamObject* p_stream = new ZlibStreamObject();
     p_stream->m_is_deflate = is_deflate;
+    p_stream->m_chunk_size = chunk_size;
+    p_stream->m_dictionary = dictionary;
+    p_stream->m_window_bits = window_bits;
     
     int32_t ret;
     if (is_deflate) {
         ret = deflateInit2(&p_stream->m_strm, level, Z_DEFLATED, window_bits, mem_level, strategy);
+        if (ret == Z_OK && !p_stream->m_dictionary.empty()) {
+            deflateSetDictionary(&p_stream->m_strm, (const Bytef*)p_stream->m_dictionary.data(), (uInt)p_stream->m_dictionary.size());
+        }
     } else {
         ret = inflateInit2(&p_stream->m_strm, window_bits);
     }
@@ -961,6 +1118,9 @@ static void createZlibStream(const v8::FunctionCallbackInfo<v8::Value>& args, in
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, streamWrite)->GetFunction(context).ToLocalChecked()).Check();
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "flush"), v8::FunctionTemplate::New(p_isolate, streamFlush)->GetFunction(context).ToLocalChecked()).Check();
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, streamEnd)->GetFunction(context).ToLocalChecked()).Check();
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, streamClose)->GetFunction(context).ToLocalChecked()).Check();
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "reset"), v8::FunctionTemplate::New(p_isolate, streamReset)->GetFunction(context).ToLocalChecked()).Check();
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "params"), v8::FunctionTemplate::New(p_isolate, streamParams)->GetFunction(context).ToLocalChecked()).Check();
 
     args.GetReturnValue().Set(js_obj);
 }
@@ -987,7 +1147,41 @@ struct BrotliStreamObject {
         if (p_enc) BrotliEncoderDestroyInstance(p_enc);
         if (p_dec) BrotliDecoderDestroyInstance(p_dec);
     }
+
+    void reset() {
+        if (m_is_encoder) {
+            if (p_enc) BrotliEncoderDestroyInstance(p_enc);
+            p_enc = BrotliEncoderCreateInstance(nullptr, nullptr, nullptr);
+        } else {
+            if (p_dec) BrotliDecoderDestroyInstance(p_dec);
+            p_dec = BrotliDecoderCreateInstance(nullptr, nullptr, nullptr);
+        }
+        m_finished = false;
+    }
 };
+
+static void brotliStreamClose(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::Data> internal_data = self->GetInternalField(0);
+    if (internal_data.IsEmpty() || !internal_data.As<v8::Value>()->IsExternal()) return;
+    BrotliStreamObject* p_obj = static_cast<BrotliStreamObject*>(internal_data.As<v8::External>()->Value());
+    if (p_obj->p_enc) {
+        BrotliEncoderDestroyInstance(p_obj->p_enc);
+        p_obj->p_enc = nullptr;
+    }
+    if (p_obj->p_dec) {
+        BrotliDecoderDestroyInstance(p_obj->p_dec);
+        p_obj->p_dec = nullptr;
+    }
+}
+
+static void brotliStreamReset(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::Data> internal_data = self->GetInternalField(0);
+    if (internal_data.IsEmpty() || !internal_data.As<v8::Value>()->IsExternal()) return;
+    BrotliStreamObject* p_obj = static_cast<BrotliStreamObject*>(internal_data.As<v8::External>()->Value());
+    p_obj->reset();
+}
 
 static void brotliStreamWrite(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
@@ -1106,6 +1300,8 @@ void Zlib::createBrotliCompress(const v8::FunctionCallbackInfo<v8::Value>& args)
 
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, brotliStreamWrite)->GetFunction(context).ToLocalChecked()).Check();
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, brotliStreamEnd)->GetFunction(context).ToLocalChecked()).Check();
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, brotliStreamClose)->GetFunction(context).ToLocalChecked()).Check();
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "reset"), v8::FunctionTemplate::New(p_isolate, brotliStreamReset)->GetFunction(context).ToLocalChecked()).Check();
     args.GetReturnValue().Set(js_obj);
 }
 
@@ -1128,6 +1324,8 @@ void Zlib::createBrotliDecompress(const v8::FunctionCallbackInfo<v8::Value>& arg
 
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, brotliStreamWrite)->GetFunction(context).ToLocalChecked()).Check();
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, brotliStreamEnd)->GetFunction(context).ToLocalChecked()).Check();
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, brotliStreamClose)->GetFunction(context).ToLocalChecked()).Check();
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "reset"), v8::FunctionTemplate::New(p_isolate, brotliStreamReset)->GetFunction(context).ToLocalChecked()).Check();
     args.GetReturnValue().Set(js_obj);
 }
 
@@ -1145,7 +1343,39 @@ struct ZstdStreamObject {
         if (p_cctx) ZSTD_freeCCtx(p_cctx);
         if (p_dctx) ZSTD_freeDCtx(p_dctx);
     }
+    
+    void reset() {
+        if (m_is_compressor) {
+            if (p_cctx) ZSTD_CCtx_reset(p_cctx, ZSTD_reset_session_and_parameters);
+        } else {
+            if (p_dctx) ZSTD_DCtx_reset(p_dctx, ZSTD_reset_session_and_parameters);
+        }
+        m_finished = false;
+    }
 };
+
+static void zstdStreamClose(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::Data> internal_data = self->GetInternalField(0);
+    if (internal_data.IsEmpty() || !internal_data.As<v8::Value>()->IsExternal()) return;
+    ZstdStreamObject* p_obj = static_cast<ZstdStreamObject*>(internal_data.As<v8::External>()->Value());
+    if (p_obj->p_cctx) {
+        ZSTD_freeCCtx(p_obj->p_cctx);
+        p_obj->p_cctx = nullptr;
+    }
+    if (p_obj->p_dctx) {
+        ZSTD_freeDCtx(p_obj->p_dctx);
+        p_obj->p_dctx = nullptr;
+    }
+}
+
+static void zstdStreamReset(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::Data> internal_data = self->GetInternalField(0);
+    if (internal_data.IsEmpty() || !internal_data.As<v8::Value>()->IsExternal()) return;
+    ZstdStreamObject* p_obj = static_cast<ZstdStreamObject*>(internal_data.As<v8::External>()->Value());
+    p_obj->reset();
+}
 
 static void zstdStreamWrite(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
@@ -1257,6 +1487,8 @@ void Zlib::createZstdCompress(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, zstdStreamWrite)->GetFunction(context).ToLocalChecked()).Check();
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, zstdStreamEnd)->GetFunction(context).ToLocalChecked()).Check();
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, zstdStreamClose)->GetFunction(context).ToLocalChecked()).Check();
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "reset"), v8::FunctionTemplate::New(p_isolate, zstdStreamReset)->GetFunction(context).ToLocalChecked()).Check();
     args.GetReturnValue().Set(js_obj);
 }
 
@@ -1278,6 +1510,8 @@ void Zlib::createZstdDecompress(const v8::FunctionCallbackInfo<v8::Value>& args)
 
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, zstdStreamWrite)->GetFunction(context).ToLocalChecked()).Check();
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, zstdStreamEnd)->GetFunction(context).ToLocalChecked()).Check();
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, zstdStreamClose)->GetFunction(context).ToLocalChecked()).Check();
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "reset"), v8::FunctionTemplate::New(p_isolate, zstdStreamReset)->GetFunction(context).ToLocalChecked()).Check();
     args.GetReturnValue().Set(js_obj);
 }
 
@@ -1292,6 +1526,8 @@ v8::Local<v8::ObjectTemplate> Zlib::createPromisesTemplate(v8::Isolate* p_isolat
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "unzip"), v8::FunctionTemplate::New(p_isolate, unzipPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "brotliCompress"), v8::FunctionTemplate::New(p_isolate, brotliCompressPromise));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "brotliDecompress"), v8::FunctionTemplate::New(p_isolate, brotliDecompressPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "zstdCompress"), v8::FunctionTemplate::New(p_isolate, zstdCompressPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "zstdDecompress"), v8::FunctionTemplate::New(p_isolate, zstdDecompressPromise));
     return tmpl;
 }
 

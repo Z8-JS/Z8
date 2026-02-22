@@ -61,6 +61,8 @@ class Zlib {
     static void unzipPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void brotliCompressPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void brotliDecompressPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void zstdCompressPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void zstdDecompressPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module
