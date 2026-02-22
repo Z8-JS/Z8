@@ -126,54 +126,6 @@ static void returnBuffer(const v8::FunctionCallbackInfo<v8::Value>& args, const 
 v8::Local<v8::ObjectTemplate> Zlib::createTemplate(v8::Isolate* p_isolate) {
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
 
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "deflateSync"),
-              v8::FunctionTemplate::New(p_isolate, deflateSync));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "inflateSync"),
-              v8::FunctionTemplate::New(p_isolate, inflateSync));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "deflateRawSync"),
-              v8::FunctionTemplate::New(p_isolate, deflateRawSync));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "inflateRawSync"),
-              v8::FunctionTemplate::New(p_isolate, inflateRawSync));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "gzipSync"),
-              v8::FunctionTemplate::New(p_isolate, gzipSync));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "gunzipSync"),
-              v8::FunctionTemplate::New(p_isolate, gunzipSync));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "unzipSync"),
-              v8::FunctionTemplate::New(p_isolate, unzipSync));
-
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "deflate"),
-              v8::FunctionTemplate::New(p_isolate, deflate));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "inflate"),
-              v8::FunctionTemplate::New(p_isolate, inflate));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "deflateRaw"),
-              v8::FunctionTemplate::New(p_isolate, deflateRaw));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "inflateRaw"),
-              v8::FunctionTemplate::New(p_isolate, inflateRaw));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "gzip"),
-              v8::FunctionTemplate::New(p_isolate, gzip));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "gunzip"),
-              v8::FunctionTemplate::New(p_isolate, gunzip));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "unzip"),
-              v8::FunctionTemplate::New(p_isolate, unzip));
-
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "brotliCompressSync"),
-              v8::FunctionTemplate::New(p_isolate, brotliCompressSync));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "brotliDecompressSync"),
-              v8::FunctionTemplate::New(p_isolate, brotliDecompressSync));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "brotliCompress"),
-              v8::FunctionTemplate::New(p_isolate, brotliCompress));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "brotliDecompress"),
-              v8::FunctionTemplate::New(p_isolate, brotliDecompress));
-
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "zstdCompressSync"),
-              v8::FunctionTemplate::New(p_isolate, zstdCompressSync));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "zstdDecompressSync"),
-              v8::FunctionTemplate::New(p_isolate, zstdDecompressSync));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "zstdCompress"),
-              v8::FunctionTemplate::New(p_isolate, zstdCompress));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "zstdDecompress"),
-              v8::FunctionTemplate::New(p_isolate, zstdDecompress));
-
     v8::Local<v8::ObjectTemplate> constants = v8::ObjectTemplate::New(p_isolate);
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_NO_COMPRESSION"), v8::Number::New(p_isolate, (double)Z_NO_COMPRESSION));
     constants->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_BEST_SPEED"), v8::Number::New(p_isolate, (double)Z_BEST_SPEED));
@@ -229,36 +181,95 @@ v8::Local<v8::ObjectTemplate> Zlib::createTemplate(v8::Isolate* p_isolate) {
     codes->Set(v8::String::NewFromUtf8Literal(p_isolate, "Z_VERSION_ERROR"), v8::Number::New(p_isolate, (double)Z_VERSION_ERROR));
 
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "codes"), codes);
-
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "constants"), constants);
 
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "crc32"),
-              v8::FunctionTemplate::New(p_isolate, crc32));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "adler32"),
-              v8::FunctionTemplate::New(p_isolate, adler32));
+    // Node.js also exposes constants on the root object
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> const_obj = constants->NewInstance(context).ToLocalChecked();
+    v8::Local<v8::Array> const_names = const_obj->GetPropertyNames(context).ToLocalChecked();
+    for (uint32_t i = 0; i < const_names->Length(); i++) {
+        v8::Local<v8::Value> key = const_names->Get(context, i).ToLocalChecked();
+        v8::Local<v8::Value> val = const_obj->Get(context, key).ToLocalChecked();
+        tmpl->Set(key.As<v8::Name>(), val);
+    }
 
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createGzip"),
-              v8::FunctionTemplate::New(p_isolate, createGzip));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createGunzip"),
-              v8::FunctionTemplate::New(p_isolate, createGunzip));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createDeflate"),
-              v8::FunctionTemplate::New(p_isolate, createDeflate));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createInflate"),
-              v8::FunctionTemplate::New(p_isolate, createInflate));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createDeflateRaw"),
-              v8::FunctionTemplate::New(p_isolate, createDeflateRaw));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createInflateRaw"),
-              v8::FunctionTemplate::New(p_isolate, createInflateRaw));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createUnzip"),
-              v8::FunctionTemplate::New(p_isolate, createUnzip));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createBrotliCompress"),
-              v8::FunctionTemplate::New(p_isolate, createBrotliCompress));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createBrotliDecompress"),
-              v8::FunctionTemplate::New(p_isolate, createBrotliDecompress));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createZstdCompress"),
-              v8::FunctionTemplate::New(p_isolate, createZstdCompress));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createZstdDecompress"),
-              v8::FunctionTemplate::New(p_isolate, createZstdDecompress));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "crc32"), v8::FunctionTemplate::New(p_isolate, crc32));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "adler32"), v8::FunctionTemplate::New(p_isolate, adler32));
+
+    // Register classes as constructors (aliases to create functions for now)
+    v8::Local<v8::FunctionTemplate> ft_gzip = v8::FunctionTemplate::New(p_isolate, createGzip);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Gzip"), ft_gzip);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createGzip"), ft_gzip);
+
+    v8::Local<v8::FunctionTemplate> ft_gunzip = v8::FunctionTemplate::New(p_isolate, createGunzip);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Gunzip"), ft_gunzip);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createGunzip"), ft_gunzip);
+
+    v8::Local<v8::FunctionTemplate> ft_deflate = v8::FunctionTemplate::New(p_isolate, createDeflate);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Deflate"), ft_deflate);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createDeflate"), ft_deflate);
+
+    v8::Local<v8::FunctionTemplate> ft_inflate = v8::FunctionTemplate::New(p_isolate, createInflate);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Inflate"), ft_inflate);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createInflate"), ft_inflate);
+
+    v8::Local<v8::FunctionTemplate> ft_deflate_raw = v8::FunctionTemplate::New(p_isolate, createDeflateRaw);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "DeflateRaw"), ft_deflate_raw);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createDeflateRaw"), ft_deflate_raw);
+
+    v8::Local<v8::FunctionTemplate> ft_inflate_raw = v8::FunctionTemplate::New(p_isolate, createInflateRaw);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "InflateRaw"), ft_inflate_raw);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createInflateRaw"), ft_inflate_raw);
+
+    v8::Local<v8::FunctionTemplate> ft_unzip = v8::FunctionTemplate::New(p_isolate, createUnzip);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Unzip"), ft_unzip);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createUnzip"), ft_unzip);
+
+    v8::Local<v8::FunctionTemplate> ft_br_comp = v8::FunctionTemplate::New(p_isolate, createBrotliCompress);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "BrotliCompress"), ft_br_comp);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createBrotliCompress"), ft_br_comp);
+
+    v8::Local<v8::FunctionTemplate> ft_br_decomp = v8::FunctionTemplate::New(p_isolate, createBrotliDecompress);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "BrotliDecompress"), ft_br_decomp);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createBrotliDecompress"), ft_br_decomp);
+
+    v8::Local<v8::FunctionTemplate> ft_zstd_comp = v8::FunctionTemplate::New(p_isolate, createZstdCompress);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZstdCompress"), ft_zstd_comp);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createZstdCompress"), ft_zstd_comp);
+
+    v8::Local<v8::FunctionTemplate> ft_zstd_decomp = v8::FunctionTemplate::New(p_isolate, createZstdDecompress);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZstdDecompress"), ft_zstd_decomp);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createZstdDecompress"), ft_zstd_decomp);
+
+    // Sync methods
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "deflateSync"), v8::FunctionTemplate::New(p_isolate, deflateSync));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "inflateSync"), v8::FunctionTemplate::New(p_isolate, inflateSync));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "deflateRawSync"), v8::FunctionTemplate::New(p_isolate, deflateRawSync));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "inflateRawSync"), v8::FunctionTemplate::New(p_isolate, inflateRawSync));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "gzipSync"), v8::FunctionTemplate::New(p_isolate, gzipSync));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "gunzipSync"), v8::FunctionTemplate::New(p_isolate, gunzipSync));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "unzipSync"), v8::FunctionTemplate::New(p_isolate, unzipSync));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "brotliCompressSync"), v8::FunctionTemplate::New(p_isolate, brotliCompressSync));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "brotliDecompressSync"), v8::FunctionTemplate::New(p_isolate, brotliDecompressSync));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "zstdCompressSync"), v8::FunctionTemplate::New(p_isolate, zstdCompressSync));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "zstdDecompressSync"), v8::FunctionTemplate::New(p_isolate, zstdDecompressSync));
+
+    // Async methods
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "deflate"), v8::FunctionTemplate::New(p_isolate, deflate));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "inflate"), v8::FunctionTemplate::New(p_isolate, inflate));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "deflateRaw"), v8::FunctionTemplate::New(p_isolate, deflateRaw));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "inflateRaw"), v8::FunctionTemplate::New(p_isolate, inflateRaw));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "gzip"), v8::FunctionTemplate::New(p_isolate, gzip));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "gunzip"), v8::FunctionTemplate::New(p_isolate, gunzip));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "unzip"), v8::FunctionTemplate::New(p_isolate, unzip));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "brotliCompress"), v8::FunctionTemplate::New(p_isolate, brotliCompress));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "brotliDecompress"), v8::FunctionTemplate::New(p_isolate, brotliDecompress));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "zstdCompress"), v8::FunctionTemplate::New(p_isolate, zstdCompress));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "zstdDecompress"), v8::FunctionTemplate::New(p_isolate, zstdDecompress));
+
+    // Promises
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "promises"), createPromisesTemplate(p_isolate));
+
     return tmpl;
 }
 
@@ -374,7 +385,7 @@ static void doInflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
     returnBuffer(args, out_buffer);
 }
 
-static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t window_bits, bool is_deflate, bool is_brotli = false, bool is_zstd = false) {
+static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t window_bits, bool is_deflate, bool is_promise = false, bool is_brotli = false, bool is_zstd = false) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::HandleScope handle_scope(p_isolate);
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
@@ -382,13 +393,21 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
     size_t length;
     std::vector<uint8_t> storage;
     if (!getInput(args, &p_data, &length, storage)) return;
+    
     v8::Local<v8::Function> callback;
-    if (args.Length() >= 2 && args[args.Length() - 1]->IsFunction()) {
-        callback = args[args.Length() - 1].As<v8::Function>();
+    v8::Local<v8::Promise::Resolver> resolver;
+
+    if (is_promise) {
+        if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) return;
+        args.GetReturnValue().Set(resolver->GetPromise());
     } else {
-        p_isolate->ThrowException(v8::Exception::TypeError(
-            v8::String::NewFromUtf8Literal(p_isolate, "Callback must be provided")));
-        return;
+        if (args.Length() >= 2 && args[args.Length() - 1]->IsFunction()) {
+            callback = args[args.Length() - 1].As<v8::Function>();
+        } else {
+            p_isolate->ThrowException(v8::Exception::TypeError(
+                v8::String::NewFromUtf8Literal(p_isolate, "Callback must be provided")));
+            return;
+        }
     }
 
     ZlibAsyncCtx* p_ctx = new ZlibAsyncCtx();
@@ -409,22 +428,38 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
     }
 
     Task* p_task = new Task();
-    p_task->m_is_promise = false;
-    p_task->m_callback.Reset(p_isolate, callback);
+    p_task->m_is_promise = is_promise;
+    if (is_promise) {
+        p_task->m_resolver.Reset(p_isolate, resolver);
+    } else {
+        p_task->m_callback.Reset(p_isolate, callback);
+    }
     p_task->p_data = p_ctx;
-    p_task->m_runner = [](v8::Isolate* p_isolate, v8::Local<v8::Context> context, Task* task) {
+
+    p_task->m_runner = [](v8::Isolate* isolate, v8::Local<v8::Context> context, Task* task) {
         ZlibAsyncCtx* p_ctx = static_cast<ZlibAsyncCtx*>(task->p_data);
-        v8::Local<v8::Value> argv[2];
-        if (p_ctx->m_is_error) {
-            argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(p_isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
-            argv[1] = v8::Null(p_isolate);
+        if (task->m_is_promise) {
+            auto resolver = task->m_resolver.Get(isolate);
+            if (p_ctx->m_is_error) {
+                resolver->Reject(context, v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked())).Check();
+            } else {
+                v8::Local<v8::Uint8Array> ui = z8::module::Buffer::createBuffer(isolate, p_ctx->m_output.size());
+                memcpy(ui->Buffer()->GetBackingStore()->Data(), p_ctx->m_output.data(), p_ctx->m_output.size());
+                resolver->Resolve(context, ui).Check();
+            }
         } else {
-            v8::Local<v8::ArrayBuffer> ab = v8::ArrayBuffer::New(p_isolate, p_ctx->m_output.size());
-            memcpy(ab->GetBackingStore()->Data(), p_ctx->m_output.data(), p_ctx->m_output.size());
-            argv[0] = v8::Null(p_isolate);
-            argv[1] = v8::Uint8Array::New(ab, 0, p_ctx->m_output.size());
+            v8::Local<v8::Value> argv[2];
+            if (p_ctx->m_is_error) {
+                argv[0] = v8::Exception::Error(v8::String::NewFromUtf8(isolate, p_ctx->m_error_msg.c_str()).ToLocalChecked());
+                argv[1] = v8::Null(isolate);
+            } else {
+                argv[0] = v8::Null(isolate);
+                v8::Local<v8::Uint8Array> ui = z8::module::Buffer::createBuffer(isolate, p_ctx->m_output.size());
+                memcpy(ui->Buffer()->GetBackingStore()->Data(), p_ctx->m_output.data(), p_ctx->m_output.size());
+                argv[1] = ui;
+            }
+            (void)task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         }
-        (void)task->m_callback.Get(p_isolate)->Call(context, context->Global(), 2, argv);
         delete p_ctx;
     };
 
@@ -605,32 +640,33 @@ void Zlib::unzipSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     doInflate(args, 15 + 32);
 }
 
-void Zlib::deflate(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    doZlibAsync(args, 15, true);
+void Zlib::deflate(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 15, true, false, false, false); }
+void Zlib::inflate(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 15, false, false, false, false); }
+void Zlib::deflateRaw(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, -15, true, false, false, false); }
+void Zlib::inflateRaw(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, -15, false, false, false, false); }
+void Zlib::gzip(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 15 + 16, true, false, false, false); }
+void Zlib::gunzip(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 15 + 16, false, false, false, false); }
+void Zlib::unzip(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 15 + 32, false, false, false, false); }
+
+void Zlib::deflatePromise(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 15, true, true, false, false); }
+void Zlib::inflatePromise(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 15, false, true, false, false); }
+void Zlib::deflateRawPromise(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, -15, true, true, false, false); }
+void Zlib::inflateRawPromise(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, -15, false, true, false, false); }
+void Zlib::gzipPromise(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 15 + 16, true, true, false, false); }
+void Zlib::gunzipPromise(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 15 + 16, false, true, false, false); }
+void Zlib::unzipPromise(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 15 + 32, false, true, false, false); }
+
+void Zlib::brotliCompress(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 0, true, false, true, false); }
+void Zlib::brotliDecompress(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 0, false, false, true, false); }
+void Zlib::brotliCompressPromise(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 0, true, true, true, false); }
+void Zlib::brotliDecompressPromise(const v8::FunctionCallbackInfo<v8::Value>& args) { doZlibAsync(args, 0, false, true, true, false); }
+
+void Zlib::zstdCompress(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    doZlibAsync(args, 0, true, false, false, true);
 }
 
-void Zlib::inflate(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    doZlibAsync(args, 15, false);
-}
-
-void Zlib::deflateRaw(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    doZlibAsync(args, -15, true);
-}
-
-void Zlib::inflateRaw(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    doZlibAsync(args, -15, false);
-}
-
-void Zlib::gzip(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    doZlibAsync(args, 15 + 16, true);
-}
-
-void Zlib::gunzip(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    doZlibAsync(args, 15 + 16, false);
-}
-
-void Zlib::unzip(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    doZlibAsync(args, 15 + 32, false);
+void Zlib::zstdDecompress(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    doZlibAsync(args, 0, false, false, false, true);
 }
 
 void Zlib::brotliCompressSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -768,21 +804,6 @@ void Zlib::zstdDecompressSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 }
 
-void Zlib::zstdCompress(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    doZlibAsync(args, 0, true, false, true);
-}
-
-void Zlib::zstdDecompress(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    doZlibAsync(args, 0, false, false, true);
-}
-
-void Zlib::brotliCompress(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    doZlibAsync(args, 0, true, true);
-}
-
-void Zlib::brotliDecompress(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    doZlibAsync(args, 0, false, true);
-}
 
 void Zlib::crc32(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
@@ -1258,6 +1279,20 @@ void Zlib::createZstdDecompress(const v8::FunctionCallbackInfo<v8::Value>& args)
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, zstdStreamWrite)->GetFunction(context).ToLocalChecked()).Check();
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, zstdStreamEnd)->GetFunction(context).ToLocalChecked()).Check();
     args.GetReturnValue().Set(js_obj);
+}
+
+v8::Local<v8::ObjectTemplate> Zlib::createPromisesTemplate(v8::Isolate* p_isolate) {
+    v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "deflate"), v8::FunctionTemplate::New(p_isolate, deflatePromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "inflate"), v8::FunctionTemplate::New(p_isolate, inflatePromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "deflateRaw"), v8::FunctionTemplate::New(p_isolate, deflateRawPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "inflateRaw"), v8::FunctionTemplate::New(p_isolate, inflateRawPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "gzip"), v8::FunctionTemplate::New(p_isolate, gzipPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "gunzip"), v8::FunctionTemplate::New(p_isolate, gunzipPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "unzip"), v8::FunctionTemplate::New(p_isolate, unzipPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "brotliCompress"), v8::FunctionTemplate::New(p_isolate, brotliCompressPromise));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "brotliDecompress"), v8::FunctionTemplate::New(p_isolate, brotliDecompressPromise));
+    return tmpl;
 }
 
 } // namespace module

@@ -50,6 +50,17 @@ class Zlib {
     static void zstdDecompress(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void createZstdCompress(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void createZstdDecompress(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static v8::Local<v8::ObjectTemplate> createPromisesTemplate(v8::Isolate* p_isolate);
+
+    static void deflatePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void inflatePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void deflateRawPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void inflateRawPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void gzipPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void gunzipPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void unzipPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void brotliCompressPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void brotliDecompressPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module
