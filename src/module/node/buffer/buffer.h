@@ -21,6 +21,10 @@ class Buffer {
     static void isEncoding(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void byteLength(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void compare(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void atob(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void btoa(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void isAscii(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void isUtf8(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Instance methods
     static void toString(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -58,6 +62,10 @@ class Buffer {
     static void readBigInt64LE(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void readBigUInt64BE(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void readBigUInt64LE(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readIntBE(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readIntLE(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readUIntBE(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readUIntLE(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Write integer methods
     static void writeUInt8(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -78,6 +86,10 @@ class Buffer {
     static void writeBigInt64LE(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void writeBigUInt64BE(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void writeBigUInt64LE(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void writeIntBE(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void writeIntLE(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void writeUIntBE(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void writeUIntLE(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Internal helpers
     static v8::Local<v8::Uint8Array> createBuffer(v8::Isolate* p_isolate, size_t length);

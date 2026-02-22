@@ -112,6 +112,10 @@ v8::Local<v8::FunctionTemplate> Buffer::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "isEncoding"), v8::FunctionTemplate::New(p_isolate, isEncoding));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "byteLength"), v8::FunctionTemplate::New(p_isolate, byteLength));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "compare"), v8::FunctionTemplate::New(p_isolate, compare));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "atob"), v8::FunctionTemplate::New(p_isolate, atob));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "btoa"), v8::FunctionTemplate::New(p_isolate, btoa));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "isAscii"), v8::FunctionTemplate::New(p_isolate, isAscii));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "isUtf8"), v8::FunctionTemplate::New(p_isolate, isUtf8));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "poolSize"), v8::Integer::New(p_isolate, 8192));
 
     // Prototype methods
@@ -150,8 +154,35 @@ v8::Local<v8::FunctionTemplate> Buffer::createTemplate(v8::Isolate* p_isolate) {
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readBigInt64LE"), v8::FunctionTemplate::New(p_isolate, readBigInt64LE));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readBigUInt64BE"), v8::FunctionTemplate::New(p_isolate, readBigUInt64BE));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readBigUInt64LE"), v8::FunctionTemplate::New(p_isolate, readBigUInt64LE));
-    // Write numeric
-    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUInt8"), v8::FunctionTemplate::New(p_isolate, writeUInt8));
+    // Variable-length read/write
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readIntBE"), v8::FunctionTemplate::New(p_isolate, readIntBE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readIntLE"), v8::FunctionTemplate::New(p_isolate, readIntLE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUIntBE"), v8::FunctionTemplate::New(p_isolate, readUIntBE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUIntLE"), v8::FunctionTemplate::New(p_isolate, readUIntLE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeIntBE"), v8::FunctionTemplate::New(p_isolate, writeIntBE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeIntLE"), v8::FunctionTemplate::New(p_isolate, writeIntLE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUIntBE"), v8::FunctionTemplate::New(p_isolate, writeUIntBE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUIntLE"), v8::FunctionTemplate::New(p_isolate, writeUIntLE));
+    // Lowercase aliases (readUint* = readUInt*, writeUint* = writeUInt*)
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUint8"),    v8::FunctionTemplate::New(p_isolate, readUInt8));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUint16BE"), v8::FunctionTemplate::New(p_isolate, readUInt16BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUint16LE"), v8::FunctionTemplate::New(p_isolate, readUInt16LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUint32BE"), v8::FunctionTemplate::New(p_isolate, readUInt32BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUint32LE"), v8::FunctionTemplate::New(p_isolate, readUInt32LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readBigUint64BE"), v8::FunctionTemplate::New(p_isolate, readBigUInt64BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readBigUint64LE"), v8::FunctionTemplate::New(p_isolate, readBigUInt64LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUintBE"),   v8::FunctionTemplate::New(p_isolate, readUIntBE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "readUintLE"),   v8::FunctionTemplate::New(p_isolate, readUIntLE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUint8"),    v8::FunctionTemplate::New(p_isolate, writeUInt8));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUint16BE"), v8::FunctionTemplate::New(p_isolate, writeUInt16BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUint16LE"), v8::FunctionTemplate::New(p_isolate, writeUInt16LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUint32BE"), v8::FunctionTemplate::New(p_isolate, writeUInt32BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUint32LE"), v8::FunctionTemplate::New(p_isolate, writeUInt32LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeBigUint64BE"), v8::FunctionTemplate::New(p_isolate, writeBigUInt64BE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeBigUint64LE"), v8::FunctionTemplate::New(p_isolate, writeBigUInt64LE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUintBE"),   v8::FunctionTemplate::New(p_isolate, writeUIntBE));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUintLE"),   v8::FunctionTemplate::New(p_isolate, writeUIntLE));
+
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeInt8"), v8::FunctionTemplate::New(p_isolate, writeInt8));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUInt16BE"), v8::FunctionTemplate::New(p_isolate, writeUInt16BE));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "writeUInt16LE"), v8::FunctionTemplate::New(p_isolate, writeUInt16LE));
@@ -179,6 +210,12 @@ void Buffer::initialize(v8::Isolate* p_isolate, v8::Local<v8::Context> context) 
     
     // Set Buffer as a global
     context->Global()->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "Buffer"), buffer_fn).Check();
+
+    // Set constants
+    v8::Local<v8::Object> constants = v8::Object::New(p_isolate);
+    constants->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "MAX_LENGTH"), v8::Number::New(p_isolate, 4294967296.0)).Check(); // 4GB
+    constants->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "MAX_STRING_LENGTH"), v8::Number::New(p_isolate, 1073741823.0)).Check(); // ~1GB
+    buffer_fn->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "constants"), constants).Check();
 
     // In Node.js, Buffer.prototype inherits from Uint8Array.prototype
     // We can try to set the prototype of Buffer.prototype to Uint8Array.prototype
@@ -214,9 +251,44 @@ void Buffer::alloc(const v8::FunctionCallbackInfo<v8::Value>& args) {
     size_t length = static_cast<size_t>(args[0]->IntegerValue(p_isolate->GetCurrentContext()).FromMaybe(0));
     v8::Local<v8::Uint8Array> ui = createBuffer(p_isolate, length);
 
-    if (args.Length() > 1) {
-        // Handle fill
-        // TODO: Implement filling logic
+    // Zero-fill first
+    void* p_raw = ui->Buffer()->GetBackingStore()->Data();
+    memset(p_raw, 0, length);
+
+    if (args.Length() > 1 && length > 0) {
+        // Simulate fill by delegating through the fill method
+        v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+        v8::HandleScope handle_scope(p_isolate);
+        uint8_t* p_data = static_cast<uint8_t*>(p_raw);
+        if (args[1]->IsNumber()) {
+            uint8_t fill_val = static_cast<uint8_t>(args[1]->Uint32Value(context).FromMaybe(0));
+            memset(p_data, fill_val, length);
+        } else if (args[1]->IsString()) {
+            std::string enc = "utf8";
+            if (args.Length() > 2 && args[2]->IsString()) {
+                v8::String::Utf8Value e(p_isolate, args[2]);
+                enc = *e;
+            }
+            v8::String::Utf8Value fill_str(p_isolate, args[1]);
+            if (fill_str.length() > 0) {
+                for (size_t i = 0; i < length; ) {
+                    size_t to_copy = std::min(static_cast<size_t>(fill_str.length()), length - i);
+                    memcpy(p_data + i, *fill_str, to_copy);
+                    i += to_copy;
+                }
+            }
+        } else if (args[1]->IsUint8Array()) {
+            v8::Local<v8::Uint8Array> fill_buf = args[1].As<v8::Uint8Array>();
+            size_t fill_len = fill_buf->ByteLength();
+            if (fill_len > 0) {
+                uint8_t* p_fill = static_cast<uint8_t*>(fill_buf->Buffer()->GetBackingStore()->Data()) + fill_buf->ByteOffset();
+                for (size_t i = 0; i < length; ) {
+                    size_t to_copy = std::min(fill_len, length - i);
+                    memcpy(p_data + i, p_fill, to_copy);
+                    i += to_copy;
+                }
+            }
+        }
     }
 
     args.GetReturnValue().Set(ui);
@@ -403,8 +475,24 @@ void Buffer::toString(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::Local<v8::Uint8Array> ui = self.As<v8::Uint8Array>();
     uint8_t* p_data = static_cast<uint8_t*>(ui->Buffer()->GetBackingStore()->Data());
-    size_t len = ui->ByteLength();
-    size_t offset = ui->ByteOffset();
+    size_t total_len = ui->ByteLength();
+    size_t offset    = ui->ByteOffset();
+
+    // Parse optional start/end args
+    int64_t start = 0;
+    int64_t end   = static_cast<int64_t>(total_len);
+    if (args.Length() > 1 && args[1]->IsNumber()) {
+        start = args[1]->IntegerValue(p_isolate->GetCurrentContext()).FromMaybe(0);
+        if (start < 0) start = std::max(static_cast<int64_t>(0), static_cast<int64_t>(total_len) + start);
+        if (start > static_cast<int64_t>(total_len)) start = static_cast<int64_t>(total_len);
+    }
+    if (args.Length() > 2 && args[2]->IsNumber()) {
+        end = args[2]->IntegerValue(p_isolate->GetCurrentContext()).FromMaybe(static_cast<int64_t>(total_len));
+        if (end < 0) end = std::max(static_cast<int64_t>(0), static_cast<int64_t>(total_len) + end);
+        if (end > static_cast<int64_t>(total_len)) end = static_cast<int64_t>(total_len);
+    }
+    if (end < start) end = start;
+    size_t len = static_cast<size_t>(end - start);
 
     std::string encoding = "utf8";
     if (args.Length() > 0 && args[0]->IsString()) {
@@ -412,18 +500,25 @@ void Buffer::toString(const v8::FunctionCallbackInfo<v8::Value>& args) {
         encoding = *enc_str;
     }
 
+    const uint8_t* p_slice = p_data + offset + static_cast<size_t>(start);
+
     if (encoding == "hex") {
-        std::string hex = bytesToHex(p_data + offset, len);
+        std::string hex = bytesToHex(p_slice, len);
         args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, hex.c_str()).ToLocalChecked());
         return;
-    } else if (encoding == "base64") {
-        std::string b64 = bytesToBase64(p_data + offset, len);
+    } else if (encoding == "base64" || encoding == "base64url") {
+        std::string b64 = bytesToBase64(p_slice, len);
         args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, b64.c_str()).ToLocalChecked());
+        return;
+    } else if (encoding == "latin1" || encoding == "binary" || encoding == "ascii") {
+        // latin1: each byte maps directly to unicode codepoint 0-255
+        std::string s(reinterpret_cast<const char*>(p_slice), len);
+        args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, s.c_str(), v8::NewStringType::kNormal, static_cast<int32_t>(len)).ToLocalChecked());
         return;
     }
 
     // Default to utf8
-    args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, (const char*)p_data + offset, v8::NewStringType::kNormal, static_cast<int32_t>(len)).ToLocalChecked());
+    args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, reinterpret_cast<const char*>(p_slice), v8::NewStringType::kNormal, static_cast<int32_t>(len)).ToLocalChecked());
 }
 
 void Buffer::write(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -436,42 +531,55 @@ void Buffer::write(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::Local<v8::Uint8Array> self = args.This().As<v8::Uint8Array>();
     uint8_t* p_data = static_cast<uint8_t*>(self->Buffer()->GetBackingStore()->Data()) + self->ByteOffset();
-    size_t length = self->ByteLength();
+    size_t buf_length = self->ByteLength();
 
     size_t offset = 0;
     if (args.Length() > 1 && args[1]->IsNumber()) {
         offset = static_cast<size_t>(args[1]->IntegerValue(context).FromMaybe(0));
     }
-    
-    if (offset >= length) {
+
+    if (offset >= buf_length) {
         args.GetReturnValue().Set(0);
         return;
     }
 
-    v8::String::Utf8Value str(p_isolate, args[0]);
-    size_t to_write = std::min((size_t)str.length(), length - offset);
-    
-    // Check for encoding
+    // Optional length param (3rd arg)
+    size_t max_write = buf_length - offset;
+    if (args.Length() > 2 && args[2]->IsNumber()) {
+        size_t len_param = static_cast<size_t>(args[2]->IntegerValue(context).FromMaybe(0));
+        if (len_param < max_write) max_write = len_param;
+    }
+
+    // Encoding is 3rd or 4th argument
     std::string encoding = "utf8";
-    if (args.Length() > 2 && args[2]->IsString()) {
+    if (args.Length() > 3 && args[3]->IsString()) {
+        v8::String::Utf8Value enc_str(p_isolate, args[3]);
+        encoding = *enc_str;
+    } else if (args.Length() > 2 && args[2]->IsString()) {
         v8::String::Utf8Value enc_str(p_isolate, args[2]);
         encoding = *enc_str;
     }
 
+    v8::String::Utf8Value str(p_isolate, args[0]);
+    size_t to_write = std::min(static_cast<size_t>(str.length()), max_write);
+
     if (encoding == "hex") {
         std::string hex_str(*str);
         size_t hex_len = hex_str.length() / 2;
-        to_write = std::min(hex_len, length - offset);
+        to_write = std::min(hex_len, max_write);
         for (size_t i = 0; i < to_write; i++) {
             int32_t high = hexValue(hex_str[i * 2]);
-            int32_t low = hexValue(hex_str[i * 2 + 1]);
-            if (high == -1 || low == -1) break;
+            int32_t low  = hexValue(hex_str[i * 2 + 1]);
+            if (high == -1 || low == -1) { to_write = i; break; }
             p_data[offset + i] = static_cast<uint8_t>((high << 4) | low);
         }
-    } else if (encoding == "base64") {
+    } else if (encoding == "base64" || encoding == "base64url") {
         std::vector<uint8_t> bytes = base64ToBytes(*str);
-        to_write = std::min(bytes.size(), length - offset);
+        to_write = std::min(bytes.size(), max_write);
         memcpy(p_data + offset, bytes.data(), to_write);
+    } else if (encoding == "latin1" || encoding == "binary" || encoding == "ascii") {
+        to_write = std::min(static_cast<size_t>(str.length()), max_write);
+        memcpy(p_data + offset, *str, to_write);
     } else {
         memcpy(p_data + offset, *str, to_write);
     }
@@ -486,23 +594,57 @@ void Buffer::fill(const v8::FunctionCallbackInfo<v8::Value>& args) {
     uint8_t* p_data = static_cast<uint8_t*>(self->Buffer()->GetBackingStore()->Data()) + self->ByteOffset();
     size_t length = self->ByteLength();
 
-    if (args.Length() < 1) {
-        memset(p_data, 0, length);
-    } else {
-        uint8_t val = 0;
-        if (args[0]->IsNumber()) {
-            val = static_cast<uint8_t>(args[0]->Uint32Value(context).FromMaybe(0));
-        } else if (args[0]->IsString()) {
-            v8::String::Utf8Value str(p_isolate, args[0]);
-            if (str.length() > 0) val = static_cast<uint8_t>((*str)[0]);
-        } else if (args[0]->IsUint8Array()) {
-            // Fill with first byte of Uint8Array for simplicity
-            v8::Local<v8::Uint8Array> fill_buf = args[0].As<v8::Uint8Array>();
-            if (fill_buf->ByteLength() > 0) {
-                val = static_cast<uint8_t*>(fill_buf->Buffer()->GetBackingStore()->Data())[fill_buf->ByteOffset()];
+    size_t fill_offset = 0;
+    size_t fill_end    = length;
+    if (args.Length() > 1 && args[1]->IsNumber()) {
+        fill_offset = static_cast<size_t>(args[1]->IntegerValue(context).FromMaybe(0));
+        if (fill_offset > length) fill_offset = length;
+    }
+    if (args.Length() > 2 && args[2]->IsNumber()) {
+        fill_end = static_cast<size_t>(args[2]->IntegerValue(context).FromMaybe(static_cast<int64_t>(length)));
+        if (fill_end > length) fill_end = length;
+    }
+    if (fill_end < fill_offset) fill_end = fill_offset;
+    size_t fill_len = fill_end - fill_offset;
+    uint8_t* p_target = p_data + fill_offset;
+
+    if (args.Length() < 1 || fill_len == 0) {
+        memset(p_target, 0, fill_len);
+    } else if (args[0]->IsNumber()) {
+        uint8_t val = static_cast<uint8_t>(args[0]->Uint32Value(context).FromMaybe(0));
+        memset(p_target, val, fill_len);
+    } else if (args[0]->IsString()) {
+        // Encoding can be 3rd or 4th argument
+        std::string enc = "utf8";
+        if (args.Length() > 3 && args[3]->IsString()) {
+            v8::String::Utf8Value e(p_isolate, args[3]); enc = *e;
+        } else if (args.Length() > 2 && args[2]->IsString()) {
+            v8::String::Utf8Value e(p_isolate, args[2]); enc = *e;
+        }
+        v8::String::Utf8Value str_val(p_isolate, args[0]);
+        size_t src_len = static_cast<size_t>(str_val.length());
+        if (src_len == 0) {
+            memset(p_target, 0, fill_len);
+        } else {
+            for (size_t i = 0; i < fill_len; ) {
+                size_t to_copy = std::min(src_len, fill_len - i);
+                memcpy(p_target + i, *str_val, to_copy);
+                i += to_copy;
             }
         }
-        memset(p_data, val, length);
+    } else if (args[0]->IsUint8Array()) {
+        v8::Local<v8::Uint8Array> fill_buf = args[0].As<v8::Uint8Array>();
+        size_t src_len = fill_buf->ByteLength();
+        if (src_len == 0) {
+            memset(p_target, 0, fill_len);
+        } else {
+            uint8_t* p_src = static_cast<uint8_t*>(fill_buf->Buffer()->GetBackingStore()->Data()) + fill_buf->ByteOffset();
+            for (size_t i = 0; i < fill_len; ) {
+                size_t to_copy = std::min(src_len, fill_len - i);
+                memcpy(p_target + i, p_src, to_copy);
+                i += to_copy;
+            }
+        }
     }
     args.GetReturnValue().Set(args.This());
 }
@@ -1175,6 +1317,203 @@ void Buffer::writeBigUInt64LE(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(v8::Integer::New(args.GetIsolate(), static_cast<int32_t>(off + 8)));
 }
 
+// ---- Variable-length read methods ----
+void Buffer::readIntBE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2) { p_isolate->ThrowException(v8::Exception::RangeError(v8::String::NewFromUtf8Literal(p_isolate, "Missing offset or byteLength"))); return; }
+    size_t off = static_cast<size_t>(args[0]->IntegerValue(context).FromMaybe(0));
+    size_t byte_local_len = static_cast<size_t>(args[1]->IntegerValue(context).FromMaybe(0));
+    size_t buf_len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, byte_local_len, buf_len);
+    uint8_t* p = getBufData(args);
+    int64_t val = 0;
+    for (size_t i = 0; i < byte_local_len; i++) val = (val << 8) | p[off + i];
+    // Sign extend
+    int64_t bits = static_cast<int64_t>(byte_local_len) * 8;
+    int64_t shift = 64 - bits;
+    val = (val << shift) >> shift;
+    args.GetReturnValue().Set(v8::Number::New(p_isolate, static_cast<double>(val)));
+}
+void Buffer::readIntLE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2) { p_isolate->ThrowException(v8::Exception::RangeError(v8::String::NewFromUtf8Literal(p_isolate, "Missing offset or byteLength"))); return; }
+    size_t off = static_cast<size_t>(args[0]->IntegerValue(context).FromMaybe(0));
+    size_t byte_local_len = static_cast<size_t>(args[1]->IntegerValue(context).FromMaybe(0));
+    size_t buf_len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, byte_local_len, buf_len);
+    uint8_t* p = getBufData(args);
+    int64_t val = 0;
+    for (int32_t i = static_cast<int32_t>(byte_local_len) - 1; i >= 0; i--) val = (val << 8) | p[off + i];
+    int64_t bits = static_cast<int64_t>(byte_local_len) * 8;
+    int64_t shift = 64 - bits;
+    val = (val << shift) >> shift;
+    args.GetReturnValue().Set(v8::Number::New(p_isolate, static_cast<double>(val)));
+}
+void Buffer::readUIntBE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2) { p_isolate->ThrowException(v8::Exception::RangeError(v8::String::NewFromUtf8Literal(p_isolate, "Missing offset or byteLength"))); return; }
+    size_t off = static_cast<size_t>(args[0]->IntegerValue(context).FromMaybe(0));
+    size_t byte_local_len = static_cast<size_t>(args[1]->IntegerValue(context).FromMaybe(0));
+    size_t buf_len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, byte_local_len, buf_len);
+    uint8_t* p = getBufData(args);
+    uint64_t val = 0;
+    for (size_t i = 0; i < byte_local_len; i++) val = (val << 8) | p[off + i];
+    args.GetReturnValue().Set(v8::Number::New(p_isolate, static_cast<double>(val)));
+}
+void Buffer::readUIntLE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2) { p_isolate->ThrowException(v8::Exception::RangeError(v8::String::NewFromUtf8Literal(p_isolate, "Missing offset or byteLength"))); return; }
+    size_t off = static_cast<size_t>(args[0]->IntegerValue(context).FromMaybe(0));
+    size_t byte_local_len = static_cast<size_t>(args[1]->IntegerValue(context).FromMaybe(0));
+    size_t buf_len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, byte_local_len, buf_len);
+    uint8_t* p = getBufData(args);
+    uint64_t val = 0;
+    for (int32_t i = static_cast<int32_t>(byte_local_len) - 1; i >= 0; i--) val = (val << 8) | p[off + i];
+    args.GetReturnValue().Set(v8::Number::New(p_isolate, static_cast<double>(val)));
+}
+
+// ---- Write variable-length methods ----
+void Buffer::writeIntBE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3) return;
+    int64_t write_val = static_cast<int64_t>(args[0]->NumberValue(context).FromMaybe(0));
+    size_t off = static_cast<size_t>(args[1]->IntegerValue(context).FromMaybe(0));
+    size_t byte_local_len = static_cast<size_t>(args[2]->IntegerValue(context).FromMaybe(0));
+    size_t buf_len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, byte_local_len, buf_len);
+    uint8_t* p = getBufData(args);
+    for (int32_t i = static_cast<int32_t>(byte_local_len) - 1; i >= 0; i--) {
+        p[off + i] = static_cast<uint8_t>(write_val & 0xff);
+        write_val >>= 8;
+    }
+    args.GetReturnValue().Set(v8::Integer::New(p_isolate, static_cast<int32_t>(off + byte_local_len)));
+}
+void Buffer::writeIntLE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3) return;
+    int64_t write_val = static_cast<int64_t>(args[0]->NumberValue(context).FromMaybe(0));
+    size_t off = static_cast<size_t>(args[1]->IntegerValue(context).FromMaybe(0));
+    size_t byte_local_len = static_cast<size_t>(args[2]->IntegerValue(context).FromMaybe(0));
+    size_t buf_len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, byte_local_len, buf_len);
+    uint8_t* p = getBufData(args);
+    for (size_t i = 0; i < byte_local_len; i++) {
+        p[off + i] = static_cast<uint8_t>(write_val & 0xff);
+        write_val >>= 8;
+    }
+    args.GetReturnValue().Set(v8::Integer::New(p_isolate, static_cast<int32_t>(off + byte_local_len)));
+}
+void Buffer::writeUIntBE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3) return;
+    uint64_t write_val = static_cast<uint64_t>(args[0]->NumberValue(context).FromMaybe(0));
+    size_t off = static_cast<size_t>(args[1]->IntegerValue(context).FromMaybe(0));
+    size_t byte_local_len = static_cast<size_t>(args[2]->IntegerValue(context).FromMaybe(0));
+    size_t buf_len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, byte_local_len, buf_len);
+    uint8_t* p = getBufData(args);
+    for (int32_t i = static_cast<int32_t>(byte_local_len) - 1; i >= 0; i--) {
+        p[off + i] = static_cast<uint8_t>(write_val & 0xff);
+        write_val >>= 8;
+    }
+    args.GetReturnValue().Set(v8::Integer::New(p_isolate, static_cast<int32_t>(off + byte_local_len)));
+}
+void Buffer::writeUIntLE(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    if (args.Length() < 3) return;
+    uint64_t write_val = static_cast<uint64_t>(args[0]->NumberValue(context).FromMaybe(0));
+    size_t off = static_cast<size_t>(args[1]->IntegerValue(context).FromMaybe(0));
+    size_t byte_local_len = static_cast<size_t>(args[2]->IntegerValue(context).FromMaybe(0));
+    size_t buf_len = args.This().As<v8::Uint8Array>()->ByteLength();
+    CHECK_OFFSET(off, byte_local_len, buf_len);
+    uint8_t* p = getBufData(args);
+    for (size_t i = 0; i < byte_local_len; i++) {
+        p[off + i] = static_cast<uint8_t>(write_val & 0xff);
+        write_val >>= 8;
+    }
+    args.GetReturnValue().Set(v8::Integer::New(p_isolate, static_cast<int32_t>(off + byte_local_len)));
+}
+
+void Buffer::atob(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 1) return;
+    v8::String::Utf8Value str(p_isolate, args[0]);
+    std::vector<uint8_t> bytes = base64ToBytes(*str);
+    // Latin1 string from bytes
+    args.GetReturnValue().Set(v8::String::NewFromOneByte(p_isolate, bytes.data(), v8::NewStringType::kNormal, static_cast<int32_t>(bytes.size())).ToLocalChecked());
+}
+
+void Buffer::btoa(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 1) return;
+    v8::String::Utf8Value str(p_isolate, args[0]);
+    std::string b64 = bytesToBase64(reinterpret_cast<const uint8_t*>(*str), str.length());
+    args.GetReturnValue().Set(v8::String::NewFromUtf8(p_isolate, b64.c_str()).ToLocalChecked());
+}
+
+void Buffer::isAscii(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 1 || !args[0]->IsUint8Array()) {
+        args.GetReturnValue().Set(v8::Boolean::New(p_isolate, false));
+        return;
+    }
+    v8::Local<v8::Uint8Array> ui = args[0].As<v8::Uint8Array>();
+    uint8_t* p_data = static_cast<uint8_t*>(ui->Buffer()->GetBackingStore()->Data()) + ui->ByteOffset();
+    size_t len = ui->ByteLength();
+    for (size_t i = 0; i < len; i++) {
+        if (p_data[i] > 127) {
+            args.GetReturnValue().Set(v8::Boolean::New(p_isolate, false));
+            return;
+        }
+    }
+    args.GetReturnValue().Set(v8::Boolean::New(p_isolate, true));
+}
+
+static bool isValidUtf8(const uint8_t* data, size_t length) {
+    size_t i = 0;
+    while (i < length) {
+        if (data[i] <= 0x7F) {
+            i += 1;
+        } else if ((data[i] & 0xE0) == 0xC0) {
+            if (i + 1 >= length || (data[i+1] & 0xC0) != 0x80) return false;
+            i += 2;
+        } else if ((data[i] & 0xF0) == 0xE0) {
+            if (i + 2 >= length || (data[i+1] & 0xC0) != 0x80 || (data[i+2] & 0xC0) != 0x80) return false;
+            i += 3;
+        } else if ((data[i] & 0xF8) == 0xF0) {
+            if (i + 3 >= length || (data[i+1] & 0xC0) != 0x80 || (data[i+2] & 0xC0) != 0x80 || (data[i+3] & 0xC0) != 0x80) return false;
+            i += 4;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+void Buffer::isUtf8(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    if (args.Length() < 1 || !args[0]->IsUint8Array()) {
+        args.GetReturnValue().Set(v8::Boolean::New(p_isolate, false));
+        return;
+    }
+    v8::Local<v8::Uint8Array> ui = args[0].As<v8::Uint8Array>();
+    uint8_t* p_data = static_cast<uint8_t*>(ui->Buffer()->GetBackingStore()->Data()) + ui->ByteOffset();
+    size_t len = ui->ByteLength();
+    args.GetReturnValue().Set(v8::Boolean::New(p_isolate, isValidUtf8(p_data, len)));
+}
+
 } // namespace module
 } // namespace z8
+
+
 
