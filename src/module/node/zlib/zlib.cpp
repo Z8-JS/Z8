@@ -14,6 +14,24 @@
 namespace z8 {
 namespace module {
 
+// Forward declarations for stream methods
+static void streamWrite(const v8::FunctionCallbackInfo<v8::Value>& args);
+static void streamFlush(const v8::FunctionCallbackInfo<v8::Value>& args);
+static void streamEnd(const v8::FunctionCallbackInfo<v8::Value>& args);
+static void streamClose(const v8::FunctionCallbackInfo<v8::Value>& args);
+static void streamReset(const v8::FunctionCallbackInfo<v8::Value>& args);
+static void streamParams(const v8::FunctionCallbackInfo<v8::Value>& args);
+
+static void brotliStreamWrite(const v8::FunctionCallbackInfo<v8::Value>& args);
+static void brotliStreamEnd(const v8::FunctionCallbackInfo<v8::Value>& args);
+static void brotliStreamClose(const v8::FunctionCallbackInfo<v8::Value>& args);
+static void brotliStreamReset(const v8::FunctionCallbackInfo<v8::Value>& args);
+
+static void zstdStreamWrite(const v8::FunctionCallbackInfo<v8::Value>& args);
+static void zstdStreamEnd(const v8::FunctionCallbackInfo<v8::Value>& args);
+static void zstdStreamClose(const v8::FunctionCallbackInfo<v8::Value>& args);
+static void zstdStreamReset(const v8::FunctionCallbackInfo<v8::Value>& args);
+
 struct ZlibAsyncCtx {
     std::vector<uint8_t> m_input;
     std::vector<uint8_t> m_output;
@@ -27,6 +45,10 @@ struct ZlibAsyncCtx {
     bool m_is_brotli = false;
     bool m_is_error = false;
     std::string m_error_msg;
+    
+    // Node.js parity
+    bool m_info = false;
+    size_t m_max_output_length = 0; // 0 means no limit
 
     // Brotli specific
     int32_t m_brotli_quality = BROTLI_DEFAULT_QUALITY;
@@ -40,7 +62,8 @@ struct ZlibAsyncCtx {
 
 static void parseZlibOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> context, v8::Local<v8::Value> options_val,
                              int32_t& level, int32_t& window_bits, int32_t& mem_level, int32_t& strategy,
-                             int32_t& chunk_size, std::vector<uint8_t>& dictionary) {
+                             int32_t& chunk_size, std::vector<uint8_t>& dictionary,
+                             size_t& max_output_length, bool& info) {
     if (options_val.IsEmpty() || !options_val->IsObject()) {
         return;
     }
@@ -68,10 +91,16 @@ static void parseZlibOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> cont
                               static_cast<uint8_t*>(dict->Buffer()->GetBackingStore()->Data()) + dict->ByteOffset() + dict->ByteLength());
         }
     }
+    if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "maxOutputLength")).ToLocal(&val) && val->IsNumber()) {
+        max_output_length = (size_t)val->NumberValue(context).FromMaybe((double)max_output_length);
+    }
+    if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "info")).ToLocal(&val) && val->IsBoolean()) {
+        info = val->BooleanValue(p_isolate);
+    }
 }
 
 static void parseBrotliOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> context, v8::Local<v8::Value> options_val,
-                               int32_t& quality, int32_t& window, int32_t& mode) {
+                               int32_t& quality, int32_t& window, int32_t& mode, int32_t& chunk_size) {
     if (options_val.IsEmpty() || !options_val->IsObject()) {
         return;
     }
@@ -86,10 +115,13 @@ static void parseBrotliOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> co
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "mode")).ToLocal(&val) && val->IsNumber()) {
         mode = val->Int32Value(context).FromMaybe(mode);
     }
+    if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "chunkSize")).ToLocal(&val) && val->IsNumber()) {
+        chunk_size = val->Int32Value(context).FromMaybe(chunk_size);
+    }
 }
 
 static void parseZstdOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> context, v8::Local<v8::Value> options_val,
-                             int32_t& level) {
+                             int32_t& level, int32_t& chunk_size) {
     if (options_val.IsEmpty() || !options_val->IsObject()) {
         return;
     }
@@ -97,6 +129,9 @@ static void parseZstdOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> cont
     v8::Local<v8::Value> val;
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "level")).ToLocal(&val) && val->IsNumber()) {
         level = val->Int32Value(context).FromMaybe(level);
+    }
+    if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "chunkSize")).ToLocal(&val) && val->IsNumber()) {
+        chunk_size = val->Int32Value(context).FromMaybe(chunk_size);
     }
 }
 
@@ -245,6 +280,16 @@ v8::Local<v8::ObjectTemplate> Zlib::createTemplate(v8::Isolate* p_isolate) {
 
     v8::Local<v8::FunctionTemplate> ft_zlib_base = v8::FunctionTemplate::New(p_isolate);
     ft_zlib_base->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "Zlib"));
+    ft_zlib_base->InstanceTemplate()->SetInternalFieldCount(1);
+    
+    v8::Local<v8::ObjectTemplate> zlib_proto = ft_zlib_base->PrototypeTemplate();
+    zlib_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, streamClose));
+    zlib_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "reset"), v8::FunctionTemplate::New(p_isolate, streamReset));
+    zlib_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "params"), v8::FunctionTemplate::New(p_isolate, streamParams));
+    zlib_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, streamWrite));
+    zlib_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, streamEnd));
+    zlib_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "flush"), v8::FunctionTemplate::New(p_isolate, streamFlush));
+
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Zlib"), ft_zlib_base);
 
     // Register classes as constructors (aliases to create functions for now)
@@ -284,18 +329,46 @@ v8::Local<v8::ObjectTemplate> Zlib::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createUnzip"), ft_unzip);
 
     v8::Local<v8::FunctionTemplate> ft_br_comp = v8::FunctionTemplate::New(p_isolate, createBrotliCompress);
+    ft_br_comp->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "BrotliCompress"));
+    ft_br_comp->InstanceTemplate()->SetInternalFieldCount(1);
+    v8::Local<v8::ObjectTemplate> br_comp_proto = ft_br_comp->PrototypeTemplate();
+    br_comp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, brotliStreamWrite));
+    br_comp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, brotliStreamEnd));
+    br_comp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, brotliStreamClose));
+    br_comp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "reset"), v8::FunctionTemplate::New(p_isolate, brotliStreamReset));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "BrotliCompress"), ft_br_comp);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createBrotliCompress"), ft_br_comp);
 
     v8::Local<v8::FunctionTemplate> ft_br_decomp = v8::FunctionTemplate::New(p_isolate, createBrotliDecompress);
+    ft_br_decomp->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "BrotliDecompress"));
+    ft_br_decomp->InstanceTemplate()->SetInternalFieldCount(1);
+    v8::Local<v8::ObjectTemplate> br_decomp_proto = ft_br_decomp->PrototypeTemplate();
+    br_decomp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, brotliStreamWrite));
+    br_decomp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, brotliStreamEnd));
+    br_decomp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, brotliStreamClose));
+    br_decomp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "reset"), v8::FunctionTemplate::New(p_isolate, brotliStreamReset));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "BrotliDecompress"), ft_br_decomp);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createBrotliDecompress"), ft_br_decomp);
 
     v8::Local<v8::FunctionTemplate> ft_zstd_comp = v8::FunctionTemplate::New(p_isolate, createZstdCompress);
+    ft_zstd_comp->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "ZstdCompress"));
+    ft_zstd_comp->InstanceTemplate()->SetInternalFieldCount(1);
+    v8::Local<v8::ObjectTemplate> zstd_comp_proto = ft_zstd_comp->PrototypeTemplate();
+    zstd_comp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, zstdStreamWrite));
+    zstd_comp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, zstdStreamEnd));
+    zstd_comp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, zstdStreamClose));
+    zstd_comp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "reset"), v8::FunctionTemplate::New(p_isolate, zstdStreamReset));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZstdCompress"), ft_zstd_comp);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createZstdCompress"), ft_zstd_comp);
 
     v8::Local<v8::FunctionTemplate> ft_zstd_decomp = v8::FunctionTemplate::New(p_isolate, createZstdDecompress);
+    ft_zstd_decomp->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "ZstdDecompress"));
+    ft_zstd_decomp->InstanceTemplate()->SetInternalFieldCount(1);
+    v8::Local<v8::ObjectTemplate> zstd_decomp_proto = ft_zstd_decomp->PrototypeTemplate();
+    zstd_decomp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, zstdStreamWrite));
+    zstd_decomp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, zstdStreamEnd));
+    zstd_decomp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, zstdStreamClose));
+    zstd_decomp_proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "reset"), v8::FunctionTemplate::New(p_isolate, zstdStreamReset));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "ZstdDecompress"), ft_zstd_decomp);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createZstdDecompress"), ft_zstd_decomp);
 
@@ -345,9 +418,11 @@ static void doDeflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
     int32_t strategy = Z_DEFAULT_STRATEGY;
     int32_t chunk_size = 16384;
     std::vector<uint8_t> dictionary;
+    size_t max_output_length = 0;
+    bool info_flag = false;
 
     if (args.Length() >= 2) {
-        parseZlibOptions(p_isolate, context, args[1], level, window_bits, mem_level, strategy, chunk_size, dictionary);
+        parseZlibOptions(p_isolate, context, args[1], level, window_bits, mem_level, strategy, chunk_size, dictionary, max_output_length, info_flag);
     }
 
     z_stream strm;
@@ -379,6 +454,12 @@ static void doDeflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
 
         ret = deflate(&strm, Z_FINISH);
         total_out += chunk_size - strm.avail_out;
+
+        if (max_output_length > 0 && total_out > max_output_length) {
+            deflateEnd(&strm);
+            p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "maxOutputLength exceeded")));
+            return;
+        }
     } while (ret == Z_OK);
 
     deflateEnd(&strm);
@@ -406,9 +487,11 @@ static void doInflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
     int32_t strategy = Z_DEFAULT_STRATEGY;
     int32_t chunk_size = 16384;
     std::vector<uint8_t> dictionary;
+    size_t max_output_length = 0;
+    bool info_flag = false;
 
     if (args.Length() >= 2) {
-        parseZlibOptions(p_isolate, context, args[1], level, window_bits, mem_level, strategy, chunk_size, dictionary);
+        parseZlibOptions(p_isolate, context, args[1], level, window_bits, mem_level, strategy, chunk_size, dictionary, max_output_length, info_flag);
     }
 
     z_stream strm;
@@ -435,6 +518,12 @@ static void doInflate(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t d
 
         ret = inflate(&strm, Z_NO_FLUSH);
         total_out += chunk_size - strm.avail_out;
+
+        if (max_output_length > 0 && total_out > max_output_length) {
+            inflateEnd(&strm);
+            p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "maxOutputLength exceeded")));
+            return;
+        }
         
         if (ret == Z_NEED_DICT) {
             if (!dictionary.empty()) {
@@ -490,11 +579,11 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
 
     if (args.Length() >= 2 && !args[1]->IsFunction()) {
         if (is_brotli) {
-            parseBrotliOptions(p_isolate, context, args[1], p_ctx->m_brotli_quality, p_ctx->m_brotli_window, p_ctx->m_brotli_mode);
+            parseBrotliOptions(p_isolate, context, args[1], p_ctx->m_brotli_quality, p_ctx->m_brotli_window, p_ctx->m_brotli_mode, p_ctx->m_chunk_size);
         } else if (is_zstd) {
-            parseZstdOptions(p_isolate, context, args[1], p_ctx->m_zstd_level);
+            parseZstdOptions(p_isolate, context, args[1], p_ctx->m_zstd_level, p_ctx->m_chunk_size);
         } else {
-            parseZlibOptions(p_isolate, context, args[1], p_ctx->m_level, p_ctx->m_window_bits, p_ctx->m_mem_level, p_ctx->m_strategy, p_ctx->m_chunk_size, p_ctx->m_dictionary);
+            parseZlibOptions(p_isolate, context, args[1], p_ctx->m_level, p_ctx->m_window_bits, p_ctx->m_mem_level, p_ctx->m_strategy, p_ctx->m_chunk_size, p_ctx->m_dictionary, p_ctx->m_max_output_length, p_ctx->m_info);
         }
     }
 
@@ -516,7 +605,15 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
             } else {
                 v8::Local<v8::Uint8Array> ui = z8::module::Buffer::createBuffer(isolate, p_ctx->m_output.size());
                 memcpy(ui->Buffer()->GetBackingStore()->Data(), p_ctx->m_output.data(), p_ctx->m_output.size());
-                resolver->Resolve(context, ui).Check();
+                
+                if (p_ctx->m_info) {
+                    v8::Local<v8::Object> res_obj = v8::Object::New(isolate);
+                    res_obj->Set(context, v8::String::NewFromUtf8Literal(isolate, "buffer"), ui).Check();
+                    // engine property could be added here if we had a persistent engine object
+                    resolver->Resolve(context, res_obj).Check();
+                } else {
+                    resolver->Resolve(context, ui).Check();
+                }
             }
         } else {
             v8::Local<v8::Value> argv[2];
@@ -527,7 +624,14 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
                 argv[0] = v8::Null(isolate);
                 v8::Local<v8::Uint8Array> ui = z8::module::Buffer::createBuffer(isolate, p_ctx->m_output.size());
                 memcpy(ui->Buffer()->GetBackingStore()->Data(), p_ctx->m_output.data(), p_ctx->m_output.size());
-                argv[1] = ui;
+                
+                if (p_ctx->m_info) {
+                    v8::Local<v8::Object> res_obj = v8::Object::New(isolate);
+                    res_obj->Set(context, v8::String::NewFromUtf8Literal(isolate, "buffer"), ui).Check();
+                    argv[1] = res_obj;
+                } else {
+                    argv[1] = ui;
+                }
             }
             (void)task->m_callback.Get(isolate)->Call(context, context->Global(), 2, argv);
         }
@@ -566,6 +670,12 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
                         size_t available_out = chunk_size;
                         uint8_t* p_next_out = p_ctx->m_output.data() + total_out;
                         res = BrotliDecoderDecompressStream(p_s, &available_in, &p_next_in, &available_out, &p_next_out, &total_out);
+                        
+                        if (p_ctx->m_max_output_length > 0 && total_out > p_ctx->m_max_output_length) {
+                             p_ctx->m_is_error = true;
+                             p_ctx->m_error_msg = "maxOutputLength exceeded";
+                             break;
+                        }
                     }
 
                     if (res != BROTLI_DECODER_RESULT_SUCCESS) {
@@ -611,6 +721,13 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
                         ZSTD_outBuffer output = { p_ctx->m_output.data(), p_ctx->m_output.size(), total_out };
                         size_t const res = ZSTD_decompressStream(p_dctx, &output, &input);
                         total_out = output.pos;
+                        
+                        if (p_ctx->m_max_output_length > 0 && total_out > p_ctx->m_max_output_length) {
+                            p_ctx->m_is_error = true;
+                            p_ctx->m_error_msg = "maxOutputLength exceeded";
+                            break;
+                        }
+
                         if (ZSTD_isError(res)) {
                             p_ctx->m_is_error = true;
                             p_ctx->m_error_msg = ZSTD_getErrorName(res);
@@ -665,6 +782,12 @@ static void doZlibAsync(const v8::FunctionCallbackInfo<v8::Value>& args, int32_t
                     ret = inflate(&strm, Z_NO_FLUSH);
                 }
                 total_out += chunk_size - strm.avail_out;
+
+                if (p_ctx->m_max_output_length > 0 && total_out > p_ctx->m_max_output_length) {
+                    p_ctx->m_is_error = true;
+                    p_ctx->m_error_msg = "maxOutputLength exceeded";
+                    break;
+                }
 
                 if (ret == Z_NEED_DICT) {
                     if (!p_ctx->m_dictionary.empty()) {
@@ -769,8 +892,9 @@ void Zlib::brotliCompressSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     int32_t quality = BROTLI_DEFAULT_QUALITY;
     int32_t window = BROTLI_DEFAULT_WINDOW;
     int32_t mode = BROTLI_DEFAULT_MODE;
+    int32_t chunk_size = 16384;
     if (args.Length() >= 2) {
-        parseBrotliOptions(p_isolate, context, args[1], quality, window, mode);
+        parseBrotliOptions(p_isolate, context, args[1], quality, window, mode, chunk_size);
     }
 
     size_t out_len = BrotliEncoderMaxCompressedSize(length);
@@ -794,6 +918,11 @@ void Zlib::brotliDecompressSync(const v8::FunctionCallbackInfo<v8::Value>& args)
     if (!getInput(args, &p_data, &length, storage)) return;
 
     // Brotli decompress options are less common in sync, but we could parse them
+    int32_t quality = 0, window = 0, mode = 0, chunk_size = 16384;
+    if (args.Length() >= 2) {
+        parseBrotliOptions(p_isolate, context, args[1], quality, window, mode, chunk_size);
+    }
+
     BrotliDecoderState* p_s = BrotliDecoderCreateInstance(nullptr, nullptr, nullptr);
     if (!p_s) {
         p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "Failed to create Brotli decoder")));
@@ -803,7 +932,8 @@ void Zlib::brotliDecompressSync(const v8::FunctionCallbackInfo<v8::Value>& args)
     size_t available_in = length;
     const uint8_t* p_next_in = p_data;
     size_t total_out = 0;
-    const size_t chunk_size = 16384;
+    // Use the parsed chunk_size
+    // const size_t chunk_size = 16384;
     std::vector<uint8_t> out_buffer;
 
     BrotliDecoderResult res = BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT;
@@ -835,8 +965,9 @@ void Zlib::zstdCompressSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     if (!getInput(args, &p_data, &length, storage)) return;
 
     int32_t level = 3;
+    int32_t chunk_size = 128 * 1024;
     if (args.Length() >= 2) {
-        parseZstdOptions(p_isolate, context, args[1], level);
+        parseZstdOptions(p_isolate, context, args[1], level, chunk_size);
     }
 
     size_t out_len = ZSTD_compressBound(length);
@@ -854,10 +985,17 @@ void Zlib::zstdCompressSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 void Zlib::zstdDecompressSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     uint8_t* p_data;
     size_t length;
     std::vector<uint8_t> storage;
     if (!getInput(args, &p_data, &length, storage)) return;
+
+    int32_t level = 0; // Not used for decompression, but needed for signature
+    int32_t chunk_size = 128 * 1024;
+    if (args.Length() >= 2) {
+        parseZstdOptions(p_isolate, context, args[1], level, chunk_size);
+    }
 
     uint64_t const decoded_size = ZSTD_getFrameContentSize(p_data, length);
     if (decoded_size != ZSTD_CONTENTSIZE_ERROR && decoded_size != ZSTD_CONTENTSIZE_UNKNOWN) {
@@ -870,7 +1008,8 @@ void Zlib::zstdDecompressSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
         returnBuffer(args, out_buffer);
     } else {
         // Fallback for unknown size
-        size_t const chunk_size = 128 * 1024;
+        // Use the parsed chunk_size
+        // size_t const chunk_size = 128 * 1024;
         std::vector<uint8_t> out_buffer;
         ZSTD_DCtx* p_dctx = ZSTD_createDCtx();
         ZSTD_inBuffer input = { p_data, length, 0 };
@@ -1079,7 +1218,9 @@ static void createZlibStream(const v8::FunctionCallbackInfo<v8::Value>& args, in
     int32_t chunk_size = 16384;
     std::vector<uint8_t> dictionary;
 
-    parseZlibOptions(p_isolate, context, options_val, level, window_bits, mem_level, strategy, chunk_size, dictionary);
+    size_t max_output_length = 0;
+    bool info_flag = false;
+    parseZlibOptions(p_isolate, context, options_val, level, window_bits, mem_level, strategy, chunk_size, dictionary, max_output_length, info_flag);
 
     ZlibStreamObject* p_stream = new ZlibStreamObject();
     p_stream->m_is_deflate = is_deflate;
@@ -1106,21 +1247,24 @@ static void createZlibStream(const v8::FunctionCallbackInfo<v8::Value>& args, in
 
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
     tmpl->SetInternalFieldCount(1);
+    
+    // In a real implementation we would fetch the correct FunctionTemplate from creation context
+    // For now we use a local template and add common methods
     v8::Local<v8::Object> js_obj = tmpl->NewInstance(context).ToLocalChecked();
     js_obj->SetInternalField(0, v8::External::New(p_isolate, p_stream));
     
-    // Register Weak Callback for cleanup
-    v8::Global<v8::Object> global_obj(p_isolate, js_obj);
-    global_obj.SetWeak(p_stream, [](const v8::WeakCallbackInfo<ZlibStreamObject>& data) {
-        delete data.GetParameter();
-    }, v8::WeakCallbackType::kParameter);
-
+    // Add methods manually for now since we don't have easy access to the Gzip/Inflate etc templates here
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, streamWrite)->GetFunction(context).ToLocalChecked()).Check();
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "flush"), v8::FunctionTemplate::New(p_isolate, streamFlush)->GetFunction(context).ToLocalChecked()).Check();
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, streamEnd)->GetFunction(context).ToLocalChecked()).Check();
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "close"), v8::FunctionTemplate::New(p_isolate, streamClose)->GetFunction(context).ToLocalChecked()).Check();
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "reset"), v8::FunctionTemplate::New(p_isolate, streamReset)->GetFunction(context).ToLocalChecked()).Check();
     js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "params"), v8::FunctionTemplate::New(p_isolate, streamParams)->GetFunction(context).ToLocalChecked()).Check();
+
+    v8::Global<v8::Object> global_obj(p_isolate, js_obj);
+    global_obj.SetWeak(p_stream, [](const v8::WeakCallbackInfo<ZlibStreamObject>& data) {
+        delete data.GetParameter();
+    }, v8::WeakCallbackType::kParameter);
 
     args.GetReturnValue().Set(js_obj);
 }
@@ -1138,6 +1282,7 @@ struct BrotliStreamObject {
     BrotliDecoderState* p_dec = nullptr;
     bool m_is_encoder;
     bool m_finished = false;
+    int32_t m_chunk_size = 16384;
 
     BrotliStreamObject(bool enc_mode) : m_is_encoder(enc_mode) {
         if (m_is_encoder) p_enc = BrotliEncoderCreateInstance(nullptr, nullptr, nullptr);
@@ -1200,7 +1345,7 @@ static void brotliStreamWrite(const v8::FunctionCallbackInfo<v8::Value>& args) {
         length = input->ByteLength();
     }
     std::vector<uint8_t> out_buffer;
-    const size_t chunk_size = 16384;
+    const size_t chunk_size = p_obj->m_chunk_size;
     size_t total_out = 0;
 
     if (p_obj->m_is_encoder) {
@@ -1246,7 +1391,7 @@ static void brotliStreamEnd(const v8::FunctionCallbackInfo<v8::Value>& args) {
     if (internal_data.IsEmpty() || !internal_data.As<v8::Value>()->IsExternal()) return;
     BrotliStreamObject* p_obj = static_cast<BrotliStreamObject*>(internal_data.As<v8::External>()->Value());
     std::vector<uint8_t> out_buffer;
-    const size_t chunk_size = 16384;
+    const size_t chunk_size = p_obj->m_chunk_size;
     size_t total_out = 0;
 
     if (p_obj->m_is_encoder) {
@@ -1276,12 +1421,14 @@ void Zlib::createBrotliCompress(const v8::FunctionCallbackInfo<v8::Value>& args)
     int32_t quality = BROTLI_DEFAULT_QUALITY;
     int32_t window = BROTLI_DEFAULT_WINDOW;
     int32_t mode = BROTLI_DEFAULT_MODE;
+    int32_t chunk_size = 16384;
 
     if (args.Length() > 0) {
-        parseBrotliOptions(p_isolate, context, args[0], quality, window, mode);
+        parseBrotliOptions(p_isolate, context, args[0], quality, window, mode, chunk_size);
     }
 
     BrotliStreamObject* p_stream = new BrotliStreamObject(true);
+    p_stream->m_chunk_size = chunk_size;
     if (p_stream->p_enc) {
         BrotliEncoderSetParameter(p_stream->p_enc, BROTLI_PARAM_QUALITY, quality);
         BrotliEncoderSetParameter(p_stream->p_enc, BROTLI_PARAM_LGWIN, window);
@@ -1310,7 +1457,13 @@ void Zlib::createBrotliDecompress(const v8::FunctionCallbackInfo<v8::Value>& arg
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     
     // Decompressor might also have options in future
+    int32_t quality = 0, window = 0, mode = 0, chunk_size = 16384;
+    if (args.Length() > 0) {
+        parseBrotliOptions(p_isolate, context, args[0], quality, window, mode, chunk_size);
+    }
+
     BrotliStreamObject* p_stream = new BrotliStreamObject(false);
+    p_stream->m_chunk_size = chunk_size;
     
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
     tmpl->SetInternalFieldCount(1);
@@ -1334,6 +1487,7 @@ struct ZstdStreamObject {
     ZSTD_DCtx* p_dctx = nullptr;
     bool m_is_compressor;
     bool m_finished = false;
+    int32_t m_chunk_size = 128 * 1024;
 
     ZstdStreamObject(bool compress_mode) : m_is_compressor(compress_mode) {
         if (m_is_compressor) p_cctx = ZSTD_createCCtx();
@@ -1394,7 +1548,7 @@ static void zstdStreamWrite(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     std::vector<uint8_t> out_buffer;
-    const size_t chunk_size = 128 * 1024;
+    const size_t chunk_size = p_obj->m_chunk_size;
     size_t total_out = 0;
 
     if (p_obj->m_is_compressor) {
@@ -1438,7 +1592,7 @@ static void zstdStreamEnd(const v8::FunctionCallbackInfo<v8::Value>& args) {
     ZstdStreamObject* p_obj = static_cast<ZstdStreamObject*>(internal_data.As<v8::External>()->Value());
 
     std::vector<uint8_t> out_buffer;
-    const size_t chunk_size = 128 * 1024;
+    const size_t chunk_size = p_obj->m_chunk_size;
     size_t total_out = 0;
 
     if (p_obj->m_is_compressor) {
@@ -1466,11 +1620,13 @@ void Zlib::createZstdCompress(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
 
     int32_t level = 3;
+    int32_t chunk_size = 128 * 1024;
     if (args.Length() > 0) {
-        parseZstdOptions(p_isolate, context, args[0], level);
+        parseZstdOptions(p_isolate, context, args[0], level, chunk_size);
     }
 
     ZstdStreamObject* p_stream = new ZstdStreamObject(true);
+    p_stream->m_chunk_size = chunk_size;
     if (p_stream->p_cctx) {
         ZSTD_CCtx_setParameter(p_stream->p_cctx, ZSTD_c_compressionLevel, level);
     }
@@ -1496,7 +1652,13 @@ void Zlib::createZstdDecompress(const v8::FunctionCallbackInfo<v8::Value>& args)
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
 
+    int32_t level = 0, chunk_size = 128 * 1024;
+    if (args.Length() > 0) {
+        parseZstdOptions(p_isolate, context, args[0], level, chunk_size);
+    }
+
     ZstdStreamObject* p_stream = new ZstdStreamObject(false);
+    p_stream->m_chunk_size = chunk_size;
     
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
     tmpl->SetInternalFieldCount(1);
