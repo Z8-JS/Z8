@@ -26,7 +26,9 @@
 
 // Interface for the node.js module
 #include "module/node/buffer/buffer.h"
+#include "module/node/events/events.h"
 #include "module/node/fs/fs.h"
+
 #include "module/node/os/os.h"
 #include "module/node/path/path.h"
 #include "module/node/process/process.h"
@@ -338,7 +340,47 @@ class Runtime {
             return module;
         }
 
+        if (specifier_str == "node:events") {
+            v8::Local<v8::ObjectTemplate> events_template = z8::module::Events::createTemplate(p_isolate);
+            v8::Local<v8::Object> events_instance = events_template->NewInstance(context).ToLocalChecked();
+            v8::Local<v8::Array> prop_names = events_instance->GetPropertyNames(context).ToLocalChecked();
+
+            std::vector<v8::Local<v8::String>> export_names;
+            export_names.push_back(v8::String::NewFromUtf8Literal(p_isolate, "default"));
+            for (uint32_t i = 0; i < prop_names->Length(); ++i) {
+                v8::Local<v8::String> name = prop_names->Get(context, i).ToLocalChecked().As<v8::String>();
+                if (name->StrictEquals(v8::String::NewFromUtf8Literal(p_isolate, "default"))) continue;
+                export_names.push_back(name);
+            }
+
+            auto module = v8::Module::CreateSyntheticModule(
+                p_isolate,
+                v8::String::NewFromUtf8Literal(p_isolate, "node:events"),
+                v8::MemorySpan<const v8::Local<v8::String>>(export_names.data(), export_names.size()),
+                [](v8::Local<v8::Context> context, v8::Local<v8::Module> module) -> v8::MaybeLocal<v8::Value> {
+                    v8::Isolate* p_isolate = v8::Isolate::GetCurrent();
+                    v8::Local<v8::ObjectTemplate> events_template = z8::module::Events::createTemplate(p_isolate);
+                    v8::Local<v8::Object> events_obj = events_template->NewInstance(context).ToLocalChecked();
+                    
+                    v8::Local<v8::Value> default_val = events_obj->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "default")).ToLocalChecked();
+                    module->SetSyntheticModuleExport(p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "default"), default_val).Check();
+
+                    v8::Local<v8::Array> prop_names = events_obj->GetPropertyNames(context).ToLocalChecked();
+                    for (uint32_t i = 0; i < prop_names->Length(); ++i) {
+                        v8::Local<v8::String> name = prop_names->Get(context, i).ToLocalChecked().As<v8::String>();
+                        if (name->StrictEquals(v8::String::NewFromUtf8Literal(p_isolate, "default"))) continue;
+                        v8::Local<v8::Value> val;
+                        if (events_obj->Get(context, name).ToLocal(&val)) {
+                            module->SetSyntheticModuleExport(p_isolate, name, val).Check();
+                        }
+                    }
+                    return v8::Undefined(p_isolate);
+                });
+            return module;
+        }
+
         if (specifier_str == "node:buffer") {
+
             v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
             v8::Local<v8::Value> buffer_val = context->Global()->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "Buffer")).ToLocalChecked();
             

@@ -79,7 +79,7 @@ $cppFlagsNoFo = $cppFlags | Where-Object { $_ -notlike '/Fo*' }
 
 $linkFlags = @(
     "/OUT:z8.exe", "/SUBSYSTEM:CONSOLE", "/MACHINE:X64", "/NOLOGO",
-    "build\main.obj", "build\temporal_shims.obj", "build\console.obj", "build\fs.obj", "build\path.obj", "build\os.obj", "build\process.obj", "build\util.obj", "build\timer.obj", "build\buffer.obj", "build\zlib.obj",
+    "build\main.obj", "build\temporal_shims.obj", "build\console.obj", "build\fs.obj", "build\path.obj", "build\os.obj", "build\process.obj", "build\util.obj", "build\timer.obj", "build\buffer.obj", "build\zlib.obj", "build\events.obj",
     "build\adler32.obj", "build\compress.obj", "build\crc32.obj", "build\deflate.obj", "build\infback.obj", "build\inffast.obj", "build\inflate.obj", "build\inftrees.obj", "build\trees.obj", "build\uncompr.obj", "build\zutil.obj",
     "build\constants.obj", "build\context.obj", "build\dictionary.obj", "build\platform.obj", "build\shared_dictionary.obj", "build\transform.obj",
     "build\bit_reader.obj", "build\decode.obj", "build\huffman.obj", "build\prefix.obj", "build\state.obj", "build\static_init_dec.obj",
@@ -110,6 +110,7 @@ Write-Host "[3/4] Compiling C++ source files..."
 $sources = @("src/main.cpp", "src/temporal_shims.cpp", "src/module/console.cpp", "src/module/node/fs/fs.cpp", "src/module/node/path/path.cpp", "src/module/node/os/os.cpp", "src/module/node/process/process.cpp",    "src/module/node/util/util.cpp",
     "src/module/node/buffer/buffer.cpp",
     "src/module/node/zlib/zlib.cpp",
+    "src/module/node/events/events.cpp",
  "src/module/timer.cpp")
 $sources += @("deps/zlib/adler32.c", "deps/zlib/compress.c", "deps/zlib/crc32.c", "deps/zlib/deflate.c", "deps/zlib/infback.c", "deps/zlib/inffast.c", "deps/zlib/inflate.c", "deps/zlib/inftrees.c", "deps/zlib/trees.c", "deps/zlib/uncompr.c", "deps/zlib/zutil.c")
 $sources += @("deps/brotli/c/common/constants.c", "deps/brotli/c/common/context.c", "deps/brotli/c/common/dictionary.c", "deps/brotli/c/common/platform.c", "deps/brotli/c/common/shared_dictionary.c", "deps/brotli/c/common/transform.c")
