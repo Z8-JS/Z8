@@ -1,4 +1,5 @@
 #include "console.h"
+#include "adaptive_io.h"
 #include "node/util/util.h"
 #include <string.h>
 #ifdef _WIN32
@@ -25,26 +26,19 @@ static void FlushAll() {
 }
 
 static void HandleCrash(int32_t sig) {
-    // Attempt one last flush before dying
     FlushAll();
-    // Re-raise the signal to allow default OS behavior (core dump, etc.)
     signal(sig, SIG_DFL);
     raise(sig);
 }
 
 int32_t Console::m_indentation_level = 0;
 
-// redundant functions removed
-
 v8::Local<v8::ObjectTemplate> Console::createTemplate(v8::Isolate* p_isolate) {
     static bool buffered = []() {
-        setvbuf(stdout, nullptr, _IOFBF, 64 * 1024);
-        setvbuf(stderr, nullptr, _IOFBF, 64 * 1024);
+        AdaptiveIO::setupBuffer(stdout);
+        AdaptiveIO::setupBuffer(stderr);
 
-        // Register normal exit handler
         std::atexit(FlushAll);
-
-        // Register crash handlers
         signal(SIGSEGV, HandleCrash);
         signal(SIGABRT, HandleCrash);
         signal(SIGFPE, HandleCrash);
@@ -166,7 +160,8 @@ void Console::count(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     std::string output = label + ": " + std::to_string(count) + "\n";
     fwrite(output.c_str(), 1, output.length(), p_out);
-    adaptiveFlush(p_out);
+    if (p_out == stderr) g_stderr_io.flushIfNeeded(p_out);
+    else g_stdout_io.flushIfNeeded(p_out);
 }
 
 void Console::countReset(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -240,7 +235,8 @@ void Console::dir(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     fwrite(result.c_str(), 1, result.length(), p_out);
-    adaptiveFlush(p_out);
+    if (p_out == stderr) g_stderr_io.flushIfNeeded(p_out);
+    else g_stdout_io.flushIfNeeded(p_out);
 }
 
 void Console::group(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -300,7 +296,8 @@ void Console::timeLog(const v8::FunctionCallbackInfo<v8::Value>& args) {
     char buf[128];
     snprintf(buf, sizeof(buf), "%s: %.3fms\n", label.c_str(), elapsed);
     fwrite(buf, 1, strlen(buf), p_out);
-    adaptiveFlush(p_out);
+    if (p_out == stderr) g_stderr_io.flushIfNeeded(p_out);
+    else g_stdout_io.flushIfNeeded(p_out);
 }
 
 void Console::timeEnd(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -331,7 +328,8 @@ void Console::timeEnd(const v8::FunctionCallbackInfo<v8::Value>& args) {
     char buf[128];
     snprintf(buf, sizeof(buf), "%s: %.3fms\n", label.c_str(), elapsed);
     fwrite(buf, 1, strlen(buf), p_out);
-    adaptiveFlush(p_out);
+    if (p_out == stderr) g_stderr_io.flushIfNeeded(p_out);
+    else g_stdout_io.flushIfNeeded(p_out);
 }
 
 void Console::trace(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -422,31 +420,18 @@ void Console::write(const v8::FunctionCallbackInfo<v8::Value>& args, const char*
         fputs("\x1b[0m\n", p_out);
     else
         fputc('\n', p_out);
-    if (is_error)
+    if (is_error) {
         fflush(p_out);
-    else
-        adaptiveFlush(p_out);
+    } else {
+        if (p_out == stderr) g_stderr_io.flushIfNeeded(p_out);
+        else g_stdout_io.flushIfNeeded(p_out);
+    }
 }
 
 void Console::adaptiveFlush(FILE* p_out) {
-    static auto last_flush = std::chrono::steady_clock::now();
-    static int32_t calls_in_burst = 0;
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_flush).count();
-    if (elapsed < 50)
-        calls_in_burst++;
-    else {
-        calls_in_burst = 0;
-        last_flush = now;
-    }
-
-    // Low latency mode: flush immediately during bursts
-    // High throughput mode: let the 64KB buffer handle it
-    if (calls_in_burst < 20 && ISATTY(FILENO(p_out))) {
-        if (p_out == stderr)
-            fflush(stdout); // Always push stdout before stderr
-        fflush(p_out);
-    }
+    // Deprecated: Logic moved to AdaptiveIO class
+    if (p_out == stderr) g_stderr_io.flushIfNeeded(p_out);
+    else g_stdout_io.flushIfNeeded(p_out);
 }
 
 } // namespace module

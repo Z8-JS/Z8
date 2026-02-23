@@ -1,4 +1,5 @@
 #include "fs.h"
+#include "../../adaptive_io.h"
 #include <chrono>
 #include <fcntl.h> // For O_* constants
 #include <filesystem>
@@ -99,24 +100,23 @@ fs::file_time_type V8MillisecondsToFileTime(double ms) {
     return fs::file_time_type::clock::now() + (system_time - std::chrono::system_clock::now());
 }
 
+#ifdef _WIN32
+static std::wstring Utf8ToWide(const std::string& utf8) {
+    if (utf8.empty()) return L"";
+    int32_t size = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int32_t)utf8.length(), nullptr, 0);
+    std::wstring wide(size, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int32_t)utf8.length(), &wide[0], size);
+    return wide;
+}
+#endif
+
 static inline bool isPathSafe(const char* p_path) {
-    if (!p_path || p_path[0] == '\0')
-        return false;
+    if (!p_path || p_path[0] == '\0') return false;
+    if (p_path[0] == '/' || p_path[0] == '\\') return false;
+    if (p_path[0] != '\0' && p_path[1] == ':') return false;
 
-    // Block absolute paths and UNC paths
-    if (p_path[0] == '/' || p_path[0] == '\\')
-        return false;
-
-    // Block drive letters
-    if (p_path[0] != '\0' && p_path[1] == ':')
-        return false;
-
-    // Use SIMD-optimized strchr to jump directly to dots
-    const char* p_dot = strchr(p_path, '.');
-    while (p_dot) {
-        if (p_dot[1] == '.')
-            return false; // Found ".."
-        p_dot = strchr(p_dot + 1, '.');
+    for (const char* p = p_path; *p; ++p) {
+        if (*p == '.' && *(p + 1) == '.') return false;
     }
     return true;
 }
@@ -130,6 +130,12 @@ v8::Local<v8::Value> FileTimeToV8Date(v8::Isolate* p_isolate, fs::file_time_type
 }
 
 v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
+    static bool buffered = []() {
+        AdaptiveIO::setupBuffer(stdout);
+        AdaptiveIO::setupBuffer(stderr);
+        return true;
+    }();
+
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
 
     tmpl->Set(v8::String::NewFromUtf8(p_isolate, "readFileSync").ToLocalChecked(),
@@ -431,6 +437,7 @@ void FS::readFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
 void FS::writeFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::HandleScope handle_scope(p_isolate);
+    v8::Local<v8::Context> p_context = p_isolate->GetCurrentContext();
 
     if (args.Length() < 2 || !args[0]->IsString() || (!args[1]->IsString() && !args[1]->IsUint8Array())) {
         p_isolate->ThrowException(
@@ -450,17 +457,46 @@ void FS::writeFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     }
 
-    v8::String::Utf8Value data_val(p_isolate, args[1]);
+    const void* p_data = nullptr;
+    size_t length = 0;
+    v8::String::Utf8Value str_data(p_isolate, args[1]);
 
+    if (args[1]->IsString()) {
+        p_data = *str_data;
+        length = str_data.length();
+    } else {
+        v8::Local<v8::Uint8Array> uint8 = args[1].As<v8::Uint8Array>();
+        p_data = static_cast<const char*>(uint8->Buffer()->GetBackingStore()->Data()) + uint8->ByteOffset();
+        length = uint8->ByteLength();
+    }
+
+#ifdef _WIN32
+    std::wstring wpath = Utf8ToWide(*path_val);
+    HANDLE h_file = CreateFileW(wpath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h_file == INVALID_HANDLE_VALUE) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "Error: Could not open file for writing (Win32)").ToLocalChecked());
+        return;
+    }
+
+    DWORD bytes_written = 0;
+    if (!WriteFile(h_file, p_data, (DWORD)length, &bytes_written, nullptr)) {
+        CloseHandle(h_file);
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "Error: Write system call failed").ToLocalChecked());
+        return;
+    }
+    CloseHandle(h_file);
+#else
     std::ofstream file(*path_val, std::ios::binary);
     if (!file.is_open()) {
         p_isolate->ThrowException(
             v8::String::NewFromUtf8(p_isolate, "Error: Could not open file for writing").ToLocalChecked());
         return;
     }
-
-    file.write(*data_val, data_val.length());
+    file.write(static_cast<const char*>(p_data), length);
     file.close();
+#endif
 }
 
 void FS::appendFileSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -1609,13 +1645,26 @@ void FS::writeSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
 #ifdef _WIN32
-    if (position != -1) {
-        _lseeki64(fd, position, SEEK_SET);
+    int32_t bytes_written;
+    if (fd == 1 || fd == 2) {
+        FILE* p_stream = (fd == 1) ? stdout : stderr;
+        bytes_written = static_cast<int32_t>(fwrite(p_data, 1, length, p_stream));
+        if (fd == 1) g_stdout_io.flushIfNeeded(stdout);
+        else g_stderr_io.flushIfNeeded(stderr);
+    } else {
+        if (position != -1) {
+            _lseeki64(fd, position, SEEK_SET);
+        }
+        bytes_written = _write(fd, p_data, static_cast<uint32_t>(length));
     }
-    int32_t bytes_written = _write(fd, p_data, static_cast<uint32_t>(length));
 #else
     ssize_t bytes_written;
-    if (position != -1) {
+    if (fd == 1 || fd == 2) {
+        FILE* p_stream = (fd == 1) ? stdout : stderr;
+        bytes_written = fwrite(p_data, 1, length, p_stream);
+        if (fd == 1) g_stdout_io.flushIfNeeded(stdout);
+        else g_stderr_io.flushIfNeeded(stderr);
+    } else if (position != -1) {
         bytes_written = pwrite(fd, p_data, length, position);
     } else {
         bytes_written = write(fd, p_data, length);
@@ -1930,7 +1979,14 @@ struct WriteFileCtx {
     bool m_is_binary = false;
     bool m_is_error = false;
     std::string m_error_msg;
+
+    // Zero-copy support
+    v8::Global<v8::Uint8Array> m_buffer_keep_alive;
+    const void* p_zero_copy_data = nullptr;
+    size_t m_zero_copy_len = 0;
 };
+
+// --- WriteFile ---
 
 void FS::writeFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
@@ -2028,8 +2084,10 @@ void FS::writeFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         p_ctx->m_is_binary = false;
     } else if (args[1]->IsUint8Array()) {
         v8::Local<v8::Uint8Array> uint8 = args[1].As<v8::Uint8Array>();
-        p_ctx->m_binary_content.resize(uint8->ByteLength());
-        uint8->CopyContents(p_ctx->m_binary_content.data(), uint8->ByteLength());
+        // Zero-copy: Keep JS object alive and use raw pointer directly in worker thread
+        p_ctx->m_buffer_keep_alive.Reset(p_isolate, uint8);
+        p_ctx->p_zero_copy_data = static_cast<const char*>(uint8->Buffer()->GetBackingStore()->Data()) + uint8->ByteOffset();
+        p_ctx->m_zero_copy_len = uint8->ByteLength();
         p_ctx->m_is_binary = true;
     }
 
@@ -2049,21 +2107,46 @@ void FS::writeFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         } else {
             p_resolver->Resolve(context, v8::Undefined(isolate)).Check();
         }
+        
+        // Cleanup global reference
+        if (!p_ctx->m_buffer_keep_alive.IsEmpty()) {
+            p_ctx->m_buffer_keep_alive.Reset();
+        }
         delete p_ctx;
     };
 
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        std::wstring wpath = Utf8ToWide(p_ctx->m_path);
+        HANDLE h_file = CreateFileW(wpath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        
+        if (h_file == INVALID_HANDLE_VALUE) {
+            p_ctx->m_is_error = true;
+            p_ctx->m_error_msg = "Could not open file for writing (Win32 API)";
+        } else {
+            const void* p_data = p_ctx->m_is_binary ? p_ctx->p_zero_copy_data : p_ctx->m_content.c_str();
+            size_t data_len = p_ctx->m_is_binary ? p_ctx->m_zero_copy_len : p_ctx->m_content.size();
+            
+            DWORD bytes_written = 0;
+            if (!WriteFile(h_file, p_data, (DWORD)data_len, &bytes_written, nullptr)) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "Write error (Win32 API)";
+            }
+            CloseHandle(h_file);
+        }
+#else
         std::ofstream file(p_ctx->m_path, std::ios::binary);
         if (!file.is_open()) {
             p_ctx->m_is_error = true;
             p_ctx->m_error_msg = "Could not open file for writing";
         } else {
             if (p_ctx->m_is_binary) {
-                file.write(p_ctx->m_binary_content.data(), p_ctx->m_binary_content.size());
+                file.write(static_cast<const char*>(p_ctx->p_zero_copy_data), p_ctx->m_zero_copy_len);
             } else {
                 file.write(p_ctx->m_content.c_str(), p_ctx->m_content.size());
             }
         }
+#endif
         TaskQueue::getInstance().enqueue(p_task);
     });
 }
@@ -2221,11 +2304,25 @@ void FS::unlink(const v8::FunctionCallbackInfo<v8::Value>& args) {
     };
 
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        #ifdef _WIN32
+        std::wstring wpath = Utf8ToWide(p_ctx->m_path);
+        if (!DeleteFileW(wpath.c_str())) {
+            DWORD err = GetLastError();
+            if (err != ERROR_FILE_NOT_FOUND) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "DeleteFileW failed";
+            } else {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "no such file or directory, unlink " + p_ctx->m_path;
+            }
+        }
+#else
         std::error_code ec;
         if (!fs::remove(p_ctx->m_path, ec)) {
             p_ctx->m_is_error = true;
             p_ctx->m_error_msg = ec ? ec.message() : "Failed to unlink file";
         }
+#endif
         TaskQueue::getInstance().enqueue(p_task);
     });
 }
@@ -2276,11 +2373,25 @@ void FS::unlinkPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     };
 
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+        #ifdef _WIN32
+        std::wstring wpath = Utf8ToWide(p_ctx->m_path);
+        if (!DeleteFileW(wpath.c_str())) {
+            DWORD err = GetLastError();
+            if (err != ERROR_FILE_NOT_FOUND) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "DeleteFileW failed";
+            } else {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "no such file or directory, unlink " + p_ctx->m_path;
+            }
+        }
+#else
         std::error_code ec;
         if (!fs::remove(p_ctx->m_path, ec)) {
             p_ctx->m_is_error = true;
             p_ctx->m_error_msg = ec ? ec.message() : "Failed to unlink file";
         }
+#endif
         TaskQueue::getInstance().enqueue(p_task);
     });
 }
@@ -2386,12 +2497,32 @@ void FS::mkdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     };
 
     ThreadPool::getInstance().enqueue([p_task, p_ctx]() {
+#ifdef _WIN32
+        std::wstring wpath = Utf8ToWide(p_ctx->m_path);
+        std::error_code ec;
+        // In the current test context, we use the simple CreateDirectoryW for non-recursive or existing check
+        if (!CreateDirectoryW(wpath.c_str(), nullptr)) {
+            DWORD err = GetLastError();
+            if (err == ERROR_PATH_NOT_FOUND) {
+                // Fallback to recursive if needed
+                fs::create_directories(p_ctx->m_path, ec);
+                if (ec) {
+                    p_ctx->m_is_error = true;
+                    p_ctx->m_error_msg = ec.message();
+                }
+            } else if (err != ERROR_ALREADY_EXISTS) {
+                p_ctx->m_is_error = true;
+                p_ctx->m_error_msg = "CreateDirectoryW failed";
+            }
+        }
+#else
         std::error_code ec;
         fs::create_directories(p_ctx->m_path, ec);
         if (ec) {
             p_ctx->m_is_error = true;
             p_ctx->m_error_msg = ec.message();
         }
+#endif
         TaskQueue::getInstance().enqueue(p_task);
     });
 }
@@ -4172,9 +4303,23 @@ void FS::write(const v8::FunctionCallbackInfo<v8::Value>& args) {
             p_ctx->m_result_count = fs_pwrite(p_ctx->m_fd, p_ctx->p_buffer_data, p_ctx->m_length, p_ctx->m_position);
         else {
 #ifdef _WIN32
-            p_ctx->m_result_count = _write(p_ctx->m_fd, p_ctx->p_buffer_data, static_cast<uint32_t>(p_ctx->m_length));
+            if (p_ctx->m_fd == 1 || p_ctx->m_fd == 2) {
+                FILE* p_stream = (p_ctx->m_fd == 1) ? stdout : stderr;
+                p_ctx->m_result_count = static_cast<int32_t>(fwrite(p_ctx->p_buffer_data, 1, p_ctx->m_length, p_stream));
+                if (p_ctx->m_fd == 1) g_stdout_io.flushIfNeeded(stdout);
+                else g_stderr_io.flushIfNeeded(stderr);
+            } else {
+                p_ctx->m_result_count = _write(p_ctx->m_fd, p_ctx->p_buffer_data, static_cast<uint32_t>(p_ctx->m_length));
+            }
 #else
-            p_ctx->m_result_count = write(p_ctx->m_fd, p_ctx->p_buffer_data, p_ctx->m_length);
+            if (p_ctx->m_fd == 1 || p_ctx->m_fd == 2) {
+                FILE* p_stream = (p_ctx->m_fd == 1) ? stdout : stderr;
+                p_ctx->m_result_count = fwrite(p_ctx->p_buffer_data, 1, p_ctx->m_length, p_stream);
+                if (p_ctx->m_fd == 1) g_stdout_io.flushIfNeeded(stdout);
+                else g_stderr_io.flushIfNeeded(stderr);
+            } else {
+                p_ctx->m_result_count = write(p_ctx->m_fd, p_ctx->p_buffer_data, p_ctx->m_length);
+            }
 #endif
         }
         if (p_ctx->m_result_count == -1) {
