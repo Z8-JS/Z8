@@ -2,9 +2,12 @@
 #include <cstring>
 #include <vector>
 #include <algorithm>
+#include <cstdio>
 
 namespace z8 {
 namespace module {
+
+int32_t Events::m_default_max_listeners = 10;
 
 v8::Local<v8::ObjectTemplate> Events::createTemplate(v8::Isolate* p_isolate) {
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
@@ -14,6 +17,9 @@ v8::Local<v8::ObjectTemplate> Events::createTemplate(v8::Isolate* p_isolate) {
     // The module object itself is just a collection of these
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventEmitter"), ee_tmpl);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "default"), ee_tmpl);
+
+    v8::Local<v8::FunctionTemplate> ee_async_tmpl = createEventEmitterAsyncResourceTemplate(p_isolate, ee_tmpl);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventEmitterAsyncResource"), ee_async_tmpl);
     
     // Named exports for static utilities
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "once"), v8::FunctionTemplate::New(p_isolate, once));
@@ -63,7 +69,7 @@ v8::Local<v8::FunctionTemplate> Events::createEventEmitterTemplate(v8::Isolate* 
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "eventNames"), v8::FunctionTemplate::New(p_isolate, eeEventNames));
 
     // Static properties on the constructor
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "defaultMaxListeners"), v8::Integer::New(p_isolate, 10));
+    tmpl->SetNativeDataProperty(v8::String::NewFromUtf8Literal(p_isolate, "defaultMaxListeners"), staticGetDefaultMaxListeners, staticSetDefaultMaxListeners);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventEmitter"), tmpl);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "once"), v8::FunctionTemplate::New(p_isolate, once));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "on"), v8::FunctionTemplate::New(p_isolate, on));
@@ -107,6 +113,38 @@ void Events::eeConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
         }
     }
     self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "captureRejections"), v8::Boolean::New(p_isolate, capture_rejections)).Check();
+}
+
+v8::Local<v8::FunctionTemplate> Events::createEventEmitterAsyncResourceTemplate(v8::Isolate* p_isolate, v8::Local<v8::FunctionTemplate> ee_tmpl) {
+    v8::Local<v8::FunctionTemplate> tmpl = v8::FunctionTemplate::New(p_isolate, eeAsyncResourceConstructor);
+    tmpl->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "EventEmitterAsyncResource"));
+    
+    // Inherit from EventEmitter
+    tmpl->Inherit(ee_tmpl);
+
+    return tmpl;
+}
+
+void Events::eeAsyncResourceConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.This();
+
+    // Call base constructor
+    eeConstructor(args);
+
+    // Initialise async resource properties
+    v8::Local<v8::String> name = v8::String::NewFromUtf8Literal(p_isolate, "EventEmitterAsyncResource");
+    if (args.Length() > 0 && args[0]->IsObject()) {
+        v8::Local<v8::Object> options = args[0].As<v8::Object>();
+        v8::Local<v8::Value> n_val;
+        if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "name")).ToLocal(&n_val) && n_val->IsString()) {
+            name = n_val.As<v8::String>();
+        }
+    }
+
+    // Since we don't have full async_hooks, we just store the name
+    (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "asyncResource"), v8::Object::New(p_isolate));
 }
 
 static void addListenerInternal(v8::Isolate* p_isolate, v8::Local<v8::Object> self, v8::Local<v8::Value> event, v8::Local<v8::Value> listener, bool prepend) {
@@ -153,6 +191,24 @@ static void addListenerInternal(v8::Isolate* p_isolate, v8::Local<v8::Object> se
             events_obj->Set(context, event, new_arr).Check();
         } else {
             arr->Set(context, arr->Length(), listener).Check();
+        }
+    }
+
+    // Check MaxListeners limit
+    v8::Local<v8::Value> max_val;
+    int32_t max_listeners = Events::m_default_max_listeners;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_maxListeners")).ToLocal(&max_val) && max_val->IsNumber()) {
+        max_listeners = max_val->Int32Value(context).FromMaybe(Events::m_default_max_listeners);
+    }
+
+    if (max_listeners > 0) {
+        v8::Local<v8::Value> handlers_check;
+        if (events_obj->Get(context, event).ToLocal(&handlers_check) && handlers_check->IsArray()) {
+            int32_t count = handlers_check.As<v8::Array>()->Length();
+            if (count > max_listeners) {
+                v8::String::Utf8Value ev_name(p_isolate, event);
+                fprintf(stderr, "(node) warning: possible EventEmitter memory leak detected. %d %s listeners added. Use emitter.setMaxListeners() to increase limit\n", count, *ev_name);
+            }
         }
     }
 }
@@ -464,11 +520,17 @@ void Events::eeRemoveAllListeners(const v8::FunctionCallbackInfo<v8::Value>& arg
 
 void Events::eeSetMaxListeners(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     if (args.Length() < 1 || !args[0]->IsNumber()) {
          p_isolate->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "The \"n\" argument must be of type number")));
          return;
     }
-    args.This()->Set(p_isolate->GetCurrentContext(), v8::String::NewFromUtf8Literal(p_isolate, "_maxListeners"), args[0]).Check();
+    int32_t n = args[0]->Int32Value(context).FromMaybe(-1);
+    if (n < 0) {
+        p_isolate->ThrowException(v8::Exception::RangeError(v8::String::NewFromUtf8Literal(p_isolate, "The value of \"n\" is out of range. It must be >= 0.")));
+        return;
+    }
+    args.This()->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_maxListeners"), args[0]).Check();
     args.GetReturnValue().Set(args.This());
 }
 
@@ -479,7 +541,7 @@ void Events::eeGetMaxListeners(const v8::FunctionCallbackInfo<v8::Value>& args) 
     if (args.This()->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_maxListeners")).ToLocal(&val) && val->IsNumber()) {
         args.GetReturnValue().Set(val);
     } else {
-        args.GetReturnValue().Set(10);
+        args.GetReturnValue().Set(m_default_max_listeners);
     }
 }
 
@@ -910,12 +972,24 @@ void Events::getEventListeners(const v8::FunctionCallbackInfo<v8::Value>& args) 
 
 void Events::setMaxListeners(const v8::FunctionCallbackInfo<v8::Value>& args) {
     // events.setMaxListeners(n[, ...eventTargets])
-    // If called with no targets, sets the global default (not fully implemented here)
-    // If called with targets, calls setMaxListeners(n) on each one
     if (args.Length() < 1) return;
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     v8::Local<v8::Value> n_val = args[0];
+
+    if (args.Length() == 1) {
+        if (!n_val->IsNumber()) {
+            p_isolate->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "The \"n\" argument must be of type number")));
+            return;
+        }
+        int32_t n = n_val->Int32Value(context).FromMaybe(-1);
+        if (n < 0) {
+            p_isolate->ThrowException(v8::Exception::RangeError(v8::String::NewFromUtf8Literal(p_isolate, "The value of \"n\" is out of range. It must be >= 0.")));
+            return;
+        }
+        m_default_max_listeners = n;
+        return;
+    }
 
     for (int32_t i = 1; i < args.Length(); ++i) {
         if (!args[i]->IsObject()) continue;
@@ -932,7 +1006,7 @@ void Events::setMaxListeners(const v8::FunctionCallbackInfo<v8::Value>& args) {
 void Events::getMaxListeners(const v8::FunctionCallbackInfo<v8::Value>& args) {
     // events.getMaxListeners(emitterOrTarget)
     if (args.Length() < 1 || !args[0]->IsObject()) {
-        args.GetReturnValue().Set(10); // default
+        args.GetReturnValue().Set(m_default_max_listeners);
         return;
     }
     v8::Isolate* p_isolate = args.GetIsolate();
@@ -947,11 +1021,43 @@ void Events::getMaxListeners(const v8::FunctionCallbackInfo<v8::Value>& args) {
             return;
         }
     }
-    args.GetReturnValue().Set(10);
+    args.GetReturnValue().Set(m_default_max_listeners);
 }
 
 void Events::addAbortListener(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    // Not implemented yet — requires AbortSignal support
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsObject() || !args[1]->IsFunction()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "The \"signal\" argument must be an object and \"listener\" must be a function")));
+        return;
+    }
+
+    v8::Local<v8::Object> signal = args[0].As<v8::Object>();
+    v8::Local<v8::Function> listener = args[1].As<v8::Function>();
+
+    v8::Local<v8::Value> aborted;
+    if (signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "aborted")).ToLocal(&aborted) && aborted->BooleanValue(p_isolate)) {
+        (void)listener->Call(context, v8::Undefined(p_isolate), 0, nullptr);
+        return;
+    }
+
+    v8::Local<v8::Value> add_fn;
+    if (signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "addEventListener")).ToLocal(&add_fn) && add_fn->IsFunction()) {
+        v8::Local<v8::Object> options = v8::Object::New(p_isolate);
+        (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "once"), v8::True(p_isolate));
+        v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "abort"), listener, options };
+        (void)add_fn.As<v8::Function>()->Call(context, signal, 3, argv);
+    }
+}
+
+void Events::staticGetDefaultMaxListeners(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    info.GetReturnValue().Set(m_default_max_listeners);
+}
+
+void Events::staticSetDefaultMaxListeners(v8::Local<v8::Name> property, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<void>& info) {
+    if (value->IsNumber()) {
+        m_default_max_listeners = value->Int32Value(info.GetIsolate()->GetCurrentContext()).FromMaybe(10);
+    }
 }
 
 } // namespace module
