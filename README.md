@@ -1,5 +1,6 @@
 # Zane V8 (Z8)
 
+![Lines of Code](https://img.shields.io/endpoint?url=https://codetabs.com/count-loc/count-loc-by-url?url=https://github.com/Z8-JS/Z8&label=Lines%20of%20Code&color=blue)
 **Zane V8 (Z8)** is a high-performance, lightweight JavaScript runtime built on top of Google's V8 engine. Written in pure C++ for maximum stability and performance on Windows.
 
 ## ✨ Features
@@ -51,3 +52,4 @@ rt.Run("console.log('Hello from Z8!');", "app.js");
 ---
 
 **Z8: V8 - A Gift from God.**
+
