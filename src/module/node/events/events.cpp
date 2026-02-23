@@ -97,6 +97,16 @@ void Events::eeConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Local<v8::Object> events_obj = v8::Object::New(p_isolate);
     self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_events"), events_obj).Check();
     self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_maxListeners"), v8::Undefined(p_isolate)).Check();
+
+    bool capture_rejections = false;
+    if (args.Length() > 0 && args[0]->IsObject()) {
+        v8::Local<v8::Object> options = args[0].As<v8::Object>();
+        v8::Local<v8::Value> cr;
+        if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "captureRejections")).ToLocal(&cr)) {
+            capture_rejections = cr->BooleanValue(p_isolate);
+        }
+    }
+    self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "captureRejections"), v8::Boolean::New(p_isolate, capture_rejections)).Check();
 }
 
 static void addListenerInternal(v8::Isolate* p_isolate, v8::Local<v8::Object> self, v8::Local<v8::Value> event, v8::Local<v8::Value> listener, bool prepend) {
@@ -251,6 +261,23 @@ void Events::eePrependOnceListener(const v8::FunctionCallbackInfo<v8::Value>& ar
     args.GetReturnValue().Set(args.This());
 }
 
+static void asyncRejectionHandler(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> data = args.Data().As<v8::Object>();
+    
+    v8::Local<v8::Value> emitter_val;
+    if (data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter")).ToLocal(&emitter_val) && emitter_val->IsObject()) {
+        v8::Local<v8::Object> emitter = emitter_val.As<v8::Object>();
+        v8::Local<v8::Value> emit_fn;
+        if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_fn) && emit_fn->IsFunction()) {
+            v8::Local<v8::Value> error = args.Length() > 0 ? args[0] : v8::Undefined(p_isolate).As<v8::Value>();
+            v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "error"), error };
+            (void)emit_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
+        }
+    }
+}
+
 void Events::eeEmit(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
@@ -296,10 +323,27 @@ void Events::eeEmit(const v8::FunctionCallbackInfo<v8::Value>& args) {
     std::vector<v8::Local<v8::Value>> argv;
     for (int32_t i = 1; i < args.Length(); i++) argv.push_back(args[i]);
 
+    v8::Local<v8::Value> cr_val;
+    bool capture_rejections = false;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "captureRejections")).ToLocal(&cr_val)) {
+        capture_rejections = cr_val->BooleanValue(p_isolate);
+    }
+
     if (handlers->IsFunction()) {
+        v8::Local<v8::Function> h = handlers.As<v8::Function>();
         v8::TryCatch try_catch(p_isolate);
-        handlers.As<v8::Function>()->Call(context, self, (int32_t)argv.size(), argv.data()).FromMaybe(v8::Local<v8::Value>());
+        v8::MaybeLocal<v8::Value> ret = h->Call(context, self, (int32_t)argv.size(), argv.data());
         if (try_catch.HasCaught()) { try_catch.ReThrow(); return; }
+
+        if (capture_rejections && !ret.IsEmpty()) {
+            v8::Local<v8::Value> r = ret.ToLocalChecked();
+            if (r->IsPromise()) {
+                v8::Local<v8::Object> data = v8::Object::New(p_isolate);
+                (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter"), self);
+                v8::Local<v8::Function> handler = v8::Function::New(context, asyncRejectionHandler, data).ToLocalChecked();
+                (void)r.As<v8::Promise>()->Catch(context, handler);
+            }
+        }
     } else if (handlers->IsArray()) {
         v8::Local<v8::Array> arr = handlers.As<v8::Array>();
         uint32_t len = arr->Length();
@@ -308,11 +352,22 @@ void Events::eeEmit(const v8::FunctionCallbackInfo<v8::Value>& args) {
         for (uint32_t i = 0; i < len; i++) snapshot->Set(context, i, arr->Get(context, i).ToLocalChecked()).Check();
 
         for (uint32_t i = 0; i < len; i++) {
-            v8::Local<v8::Value> h = snapshot->Get(context, i).ToLocalChecked();
-            if (h->IsFunction()) {
+            v8::Local<v8::Value> h_val = snapshot->Get(context, i).ToLocalChecked();
+            if (h_val->IsFunction()) {
+                v8::Local<v8::Function> h = h_val.As<v8::Function>();
                 v8::TryCatch try_catch(p_isolate);
-                h.As<v8::Function>()->Call(context, self, (int32_t)argv.size(), argv.data()).FromMaybe(v8::Local<v8::Value>());
+                v8::MaybeLocal<v8::Value> ret = h->Call(context, self, (int32_t)argv.size(), argv.data());
                 if (try_catch.HasCaught()) { try_catch.ReThrow(); return; }
+
+                if (capture_rejections && !ret.IsEmpty()) {
+                    v8::Local<v8::Value> r = ret.ToLocalChecked();
+                    if (r->IsPromise()) {
+                        v8::Local<v8::Object> data = v8::Object::New(p_isolate);
+                        (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter"), self);
+                        v8::Local<v8::Function> handler = v8::Function::New(context, asyncRejectionHandler, data).ToLocalChecked();
+                        (void)r.As<v8::Promise>()->Catch(context, handler);
+                    }
+                }
             }
         }
     }
@@ -516,26 +571,309 @@ void Events::eeEventNames(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 // Static Utilities Implementation
 
-void Events::once(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    // Simplified Promise-based 'once' for the module
+// Helper for events.once resolution
+static void onceResolveWrapper(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
-    if (args.Length() < 2) return;
+    v8::Local<v8::Object> data = args.Data().As<v8::Object>();
+    
+    v8::Local<v8::Value> resolver_val;
+    if (!data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "resolver")).ToLocal(&resolver_val)) return;
+    v8::Local<v8::Promise::Resolver> resolver = resolver_val.As<v8::Promise::Resolver>();
+
+    // Pack arguments into an array
+    int32_t arg_count = args.Length();
+    v8::Local<v8::Array> arr = v8::Array::New(p_isolate, arg_count);
+    for (int32_t i = 0; i < arg_count; i++) {
+        (void)arr->Set(context, i, args[i]);
+    }
+    
+    (void)resolver->Resolve(context, arr);
+
+    // Cleanup: Remove listeners
+    v8::Local<v8::Value> emitter_val, name_val, error_wrapper_val;
+    if (data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter")).ToLocal(&emitter_val) &&
+        data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "name")).ToLocal(&name_val) &&
+        data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "errorWrapper")).ToLocal(&error_wrapper_val)) {
+        
+        v8::Local<v8::Object> emitter = emitter_val.As<v8::Object>();
+        v8::Local<v8::Value> remove_fn;
+        if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "removeListener")).ToLocal(&remove_fn) && remove_fn->IsFunction()) {
+            v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "error"), error_wrapper_val };
+            (void)remove_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
+        }
+    }
+}
+
+static void onceRejectWrapper(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> data = args.Data().As<v8::Object>();
+    
+    v8::Local<v8::Value> resolver_val;
+    if (!data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "resolver")).ToLocal(&resolver_val)) return;
+    v8::Local<v8::Promise::Resolver> resolver = resolver_val.As<v8::Promise::Resolver>();
+
+    v8::Local<v8::Value> error = args.Length() > 0 ? args[0] : v8::Undefined(p_isolate).As<v8::Value>();
+    (void)resolver->Reject(context, error);
+
+    // Cleanup: Remove listeners
+    v8::Local<v8::Value> emitter_val, name_val, resolve_wrapper_val;
+    if (data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter")).ToLocal(&emitter_val) &&
+        data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "name")).ToLocal(&name_val) &&
+        data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "resolveWrapper")).ToLocal(&resolve_wrapper_val)) {
+        
+        v8::Local<v8::Object> emitter = emitter_val.As<v8::Object>();
+        v8::Local<v8::Value> remove_fn;
+        if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "removeListener")).ToLocal(&remove_fn) && remove_fn->IsFunction()) {
+            v8::Local<v8::Value> argv[] = { name_val, resolve_wrapper_val };
+            (void)remove_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
+        }
+    }
+}
+
+void Events::once(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsObject()) return;
+
+    v8::Local<v8::Object> emitter = args[0].As<v8::Object>();
+    v8::Local<v8::Value> name = args[1];
 
     v8::Local<v8::Promise::Resolver> resolver = v8::Promise::Resolver::New(context).ToLocalChecked();
-    
-    // In a real implementation we'd attach a listener to args[0] for event args[1]
-    // that resolves the promise with the args from 'emit'.
-    // For now, return a pending promise to satisfy the API shape.
     args.GetReturnValue().Set(resolver->GetPromise());
+
+    // Special case: if we are waiting for 'error', it resolves instead of rejecting
+    bool is_error_event = false;
+    if (name->IsString()) {
+        v8::String::Utf8Value utf8(p_isolate, name);
+        if (strcmp(*utf8, "error") == 0) is_error_event = true;
+    }
+
+    v8::Local<v8::Object> data = v8::Object::New(p_isolate);
+    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "resolver"), resolver);
+    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter"), emitter);
+    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "name"), name);
+
+    v8::Local<v8::Function> resolve_wrapper = v8::Function::New(context, onceResolveWrapper, data).ToLocalChecked();
+    v8::Local<v8::Function> reject_wrapper = v8::Function::New(context, onceRejectWrapper, data).ToLocalChecked();
+
+    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "resolveWrapper"), resolve_wrapper);
+    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "errorWrapper"), reject_wrapper);
+
+    v8::Local<v8::Value> once_fn;
+    if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "once")).ToLocal(&once_fn) && once_fn->IsFunction()) {
+        // Add success listener
+        v8::Local<v8::Value> argv[] = { name, resolve_wrapper };
+        (void)once_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
+
+        // Add error listener (unless we ARE waiting for error)
+        if (!is_error_event) {
+            v8::Local<v8::Value> error_argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "error"), reject_wrapper };
+            (void)once_fn.As<v8::Function>()->Call(context, emitter, 2, error_argv);
+        }
+    }
+}
+
+// Helper to create the { value, done } object
+static v8::Local<v8::Object> createIterResult(v8::Isolate* p_isolate, v8::Local<v8::Context> context, v8::Local<v8::Value> value, bool done) {
+    v8::Local<v8::Object> result = v8::Object::New(p_isolate);
+    (void)result->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "value"), value);
+    (void)result->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "done"), v8::Boolean::New(p_isolate, done));
+    return result;
+}
+
+static void iterNext(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.This();
+
+    v8::Local<v8::Value> error, queue_val, resolvers_val, done_val;
+    (void)self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_error")).ToLocal(&error);
+    (void)self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_queue")).ToLocal(&queue_val);
+    (void)self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_resolvers")).ToLocal(&resolvers_val);
+    (void)self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_done")).ToLocal(&done_val);
+
+    if (!error->IsUndefined()) {
+        v8::Local<v8::Promise::Resolver> resolver = v8::Promise::Resolver::New(context).ToLocalChecked();
+        (void)resolver->Reject(context, error);
+        args.GetReturnValue().Set(resolver->GetPromise());
+        return;
+    }
+
+    v8::Local<v8::Array> queue = queue_val.As<v8::Array>();
+    if (queue->Length() > 0) {
+        v8::Local<v8::Value> value = queue->Get(context, 0).ToLocalChecked();
+        // Shift queue
+        v8::Local<v8::Function> shift_fn = queue->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "shift")).ToLocalChecked().As<v8::Function>();
+        (void)shift_fn->Call(context, queue, 0, nullptr);
+
+        v8::Local<v8::Promise::Resolver> resolver = v8::Promise::Resolver::New(context).ToLocalChecked();
+        (void)resolver->Resolve(context, createIterResult(p_isolate, context, value, false));
+        args.GetReturnValue().Set(resolver->GetPromise());
+        return;
+    }
+
+    if (done_val->BooleanValue(p_isolate)) {
+        v8::Local<v8::Promise::Resolver> resolver = v8::Promise::Resolver::New(context).ToLocalChecked();
+        (void)resolver->Resolve(context, createIterResult(p_isolate, context, v8::Undefined(p_isolate), true));
+        args.GetReturnValue().Set(resolver->GetPromise());
+        return;
+    }
+
+    // Pending resolver
+    v8::Local<v8::Promise::Resolver> resolver = v8::Promise::Resolver::New(context).ToLocalChecked();
+    v8::Local<v8::Array> resolvers = resolvers_val.As<v8::Array>();
+    (void)resolvers->Set(context, resolvers->Length(), resolver);
+    args.GetReturnValue().Set(resolver->GetPromise());
+}
+
+static void iterReturn(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.This();
+
+    (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_done"), v8::True(p_isolate));
+
+    v8::Local<v8::Value> emitter_val, name_val, listener_val, error_listener_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_emitter")).ToLocal(&emitter_val) && emitter_val->IsObject()) {
+        v8::Local<v8::Object> emitter = emitter_val.As<v8::Object>();
+        v8::Local<v8::Value> remove_fn;
+        if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "removeListener")).ToLocal(&remove_fn) && remove_fn->IsFunction()) {
+            if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_name")).ToLocal(&name_val) &&
+                self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_listener")).ToLocal(&listener_val)) {
+                v8::Local<v8::Value> argv[] = { name_val, listener_val };
+                (void)remove_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
+            }
+            if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_error_listener")).ToLocal(&error_listener_val)) {
+                v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "error"), error_listener_val };
+                (void)remove_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
+            }
+        }
+    }
+
+    // Flush resolvers
+    v8::Local<v8::Value> resolvers_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_resolvers")).ToLocal(&resolvers_val) && resolvers_val->IsArray()) {
+        v8::Local<v8::Array> resolvers = resolvers_val.As<v8::Array>();
+        for (uint32_t i = 0; i < resolvers->Length(); i++) {
+            v8::Local<v8::Promise::Resolver> res = resolvers->Get(context, i).ToLocalChecked().As<v8::Promise::Resolver>();
+            (void)res->Resolve(context, createIterResult(p_isolate, context, v8::Undefined(p_isolate), true));
+        }
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_resolvers"), v8::Array::New(p_isolate, 0));
+    }
+
+    v8::Local<v8::Promise::Resolver> resolver = v8::Promise::Resolver::New(context).ToLocalChecked();
+    (void)resolver->Resolve(context, createIterResult(p_isolate, context, v8::Undefined(p_isolate), true));
+    args.GetReturnValue().Set(resolver->GetPromise());
+}
+
+static void onListener(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.Data().As<v8::Object>();
+
+    v8::Local<v8::Value> done_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_done")).ToLocal(&done_val) && done_val->BooleanValue(p_isolate)) return;
+
+    // Pack args
+    v8::Local<v8::Array> arr = v8::Array::New(p_isolate, args.Length());
+    for (int32_t i = 0; i < args.Length(); i++) (void)arr->Set(context, i, args[i]);
+
+    v8::Local<v8::Value> resolvers_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_resolvers")).ToLocal(&resolvers_val) && resolvers_val->IsArray()) {
+        v8::Local<v8::Array> resolvers = resolvers_val.As<v8::Array>();
+        if (resolvers->Length() > 0) {
+            v8::Local<v8::Promise::Resolver> res = resolvers->Get(context, 0).ToLocalChecked().As<v8::Promise::Resolver>();
+            // Shift resolvers
+            v8::Local<v8::Function> shift_fn = resolvers->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "shift")).ToLocalChecked().As<v8::Function>();
+            (void)shift_fn->Call(context, resolvers, 0, nullptr);
+
+            (void)res->Resolve(context, createIterResult(p_isolate, context, arr, false));
+            return;
+        }
+    }
+
+    v8::Local<v8::Value> queue_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_queue")).ToLocal(&queue_val) && queue_val->IsArray()) {
+        v8::Local<v8::Array> queue = queue_val.As<v8::Array>();
+        (void)queue->Set(context, queue->Length(), arr);
+    }
+}
+
+static void onErrorListener(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.Data().As<v8::Object>();
+
+    v8::Local<v8::Value> error = args.Length() > 0 ? args[0] : v8::Undefined(p_isolate).As<v8::Value>();
+    (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_error"), error);
+
+    // Flush resolvers with rejection
+    v8::Local<v8::Value> resolvers_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_resolvers")).ToLocal(&resolvers_val) && resolvers_val->IsArray()) {
+        v8::Local<v8::Array> resolvers = resolvers_val.As<v8::Array>();
+        for (uint32_t i = 0; i < resolvers->Length(); i++) {
+            v8::Local<v8::Promise::Resolver> res = resolvers->Get(context, i).ToLocalChecked().As<v8::Promise::Resolver>();
+            (void)res->Reject(context, error);
+        }
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_resolvers"), v8::Array::New(p_isolate, 0));
+    }
+
+    // Auto cleanup
+    v8::Local<v8::Function> return_fn = v8::Function::New(context, iterReturn, self).ToLocalChecked();
+    (void)return_fn->Call(context, self, 0, nullptr);
 }
 
 void Events::on(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    // node:events static on() returns an AsyncIterator.
-    // Extremely complex to implement in C++ without internal JS helpers.
-    // Return empty object for now.
-    args.GetReturnValue().Set(v8::Object::New(p_isolate));
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    if (args.Length() < 2 || !args[0]->IsObject()) return;
+
+    v8::Local<v8::Object> emitter = args[0].As<v8::Object>();
+    v8::Local<v8::Value> name = args[1];
+
+    v8::Local<v8::Object> iterator = v8::Object::New(p_isolate);
+    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_queue"), v8::Array::New(p_isolate, 0));
+    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_resolvers"), v8::Array::New(p_isolate, 0));
+    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_error"), v8::Undefined(p_isolate));
+    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_done"), v8::False(p_isolate));
+    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_emitter"), emitter);
+    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_name"), name);
+
+    v8::Local<v8::Function> next_fn = v8::Function::New(context, iterNext).ToLocalChecked();
+    v8::Local<v8::Function> return_fn = v8::Function::New(context, iterReturn).ToLocalChecked();
+    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "next"), next_fn);
+    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "return"), return_fn);
+    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "throw"), return_fn); // Simple throw implementation
+
+    // [Symbol.asyncIterator]
+    (void)iterator->Set(context, v8::Symbol::GetAsyncIterator(p_isolate), v8::Function::New(context, [](const v8::FunctionCallbackInfo<v8::Value>& a) {
+        a.GetReturnValue().Set(a.This());
+    }).ToLocalChecked());
+
+    v8::Local<v8::Function> listener = v8::Function::New(context, onListener, iterator).ToLocalChecked();
+    v8::Local<v8::Function> error_listener = v8::Function::New(context, onErrorListener, iterator).ToLocalChecked();
+    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_listener"), listener);
+    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_error_listener"), error_listener);
+
+    v8::Local<v8::Value> on_fn;
+    if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "on")).ToLocal(&on_fn) && on_fn->IsFunction()) {
+        v8::Local<v8::Value> argv[] = { name, listener };
+        (void)on_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
+
+        bool is_error_event = false;
+        if (name->IsString()) {
+            v8::String::Utf8Value utf8(p_isolate, name);
+            if (strcmp(*utf8, "error") == 0) is_error_event = true;
+        }
+        if (!is_error_event) {
+            v8::Local<v8::Value> error_argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "error"), error_listener };
+            (void)on_fn.As<v8::Function>()->Call(context, emitter, 2, error_argv);
+        }
+    }
+
+    args.GetReturnValue().Set(iterator);
 }
 
 void Events::listenerCount(const v8::FunctionCallbackInfo<v8::Value>& args) {
