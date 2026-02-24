@@ -42,10 +42,15 @@ class Events {
     static v8::Local<v8::FunctionTemplate> createEventEmitterAsyncResourceTemplate(v8::Isolate* p_isolate, v8::Local<v8::FunctionTemplate> ee_tmpl);
     static void eeAsyncResourceConstructor(const v8::FunctionCallbackInfo<v8::Value>& args);
 
-    // Default max listeners storage and static accessors
+    // Default max listeners and capture rejections storage
     static int32_t m_default_max_listeners;
+    static bool m_default_capture_rejections;
+
     static void staticGetDefaultMaxListeners(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info);
     static void staticSetDefaultMaxListeners(v8::Local<v8::Name> property, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<void>& info);
+    
+    static void staticGetDefaultCaptureRejections(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info);
+    static void staticSetDefaultCaptureRejections(v8::Local<v8::Name> property, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<void>& info);
 };
 
 } // namespace module

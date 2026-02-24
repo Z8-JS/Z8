@@ -8,6 +8,7 @@ namespace z8 {
 namespace module {
 
 int32_t Events::m_default_max_listeners = 10;
+bool Events::m_default_capture_rejections = false;
 
 v8::Local<v8::ObjectTemplate> Events::createTemplate(v8::Isolate* p_isolate) {
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
@@ -35,13 +36,13 @@ v8::Local<v8::ObjectTemplate> Events::createTemplate(v8::Isolate* p_isolate) {
         p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "events.errorMonitor"));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "errorMonitor"), error_monitor_sym);
 
-    v8::Local<v8::Symbol> capture_rejection_sym = v8::Symbol::New(
+    v8::Local<v8::Symbol> capture_rejection_sym = v8::Symbol::For(
         p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "nodejs.rejection"));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "captureRejectionSymbol"), capture_rejection_sym);
 
-    // captureRejections flag (default false)
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "captureRejections"),
-              v8::Boolean::New(p_isolate, false));
+    // captureRejections flag (global default)
+    tmpl->SetNativeDataProperty(v8::String::NewFromUtf8Literal(p_isolate, "captureRejections"),
+                                staticGetDefaultCaptureRejections, staticSetDefaultCaptureRejections);
 
     return tmpl;
 }
@@ -83,12 +84,16 @@ v8::Local<v8::FunctionTemplate> Events::createEventEmitterTemplate(v8::Isolate* 
         p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "events.errorMonitor"));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "errorMonitor"), error_monitor_sym);
 
-    v8::Local<v8::Symbol> capture_rejection_sym = v8::Symbol::New(
+    v8::Local<v8::Symbol> capture_rejection_sym = v8::Symbol::For(
         p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "nodejs.rejection"));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "captureRejectionSymbol"), capture_rejection_sym);
 
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "captureRejections"),
-              v8::Boolean::New(p_isolate, false));
+    // Explicit Resource Management (Symbol.dispose)
+    v8::Local<v8::Symbol> dispose_sym = v8::Symbol::GetDispose(p_isolate);
+    proto->Set(dispose_sym, v8::FunctionTemplate::New(p_isolate, eeRemoveAllListeners));
+
+    tmpl->SetNativeDataProperty(v8::String::NewFromUtf8Literal(p_isolate, "captureRejections"),
+                                staticGetDefaultCaptureRejections, staticSetDefaultCaptureRejections);
 
     return tmpl;
 }
@@ -103,8 +108,8 @@ void Events::eeConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Local<v8::Object> events_obj = v8::Object::New(p_isolate);
     self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_events"), events_obj).Check();
     self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_maxListeners"), v8::Undefined(p_isolate)).Check();
-
-    bool capture_rejections = false;
+    
+    bool capture_rejections = m_default_capture_rejections;
     if (args.Length() > 0 && args[0]->IsObject()) {
         v8::Local<v8::Object> options = args[0].As<v8::Object>();
         v8::Local<v8::Value> cr;
@@ -321,15 +326,27 @@ static void asyncRejectionHandler(const v8::FunctionCallbackInfo<v8::Value>& arg
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     v8::Local<v8::Object> data = args.Data().As<v8::Object>();
-    
+
     v8::Local<v8::Value> emitter_val;
-    if (data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter")).ToLocal(&emitter_val) && emitter_val->IsObject()) {
-        v8::Local<v8::Object> emitter = emitter_val.As<v8::Object>();
+    if (!data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter")).ToLocal(&emitter_val)) return;
+    v8::Local<v8::Object> emitter = emitter_val.As<v8::Object>();
+
+    v8::Local<v8::Value> reason = args[0];
+    v8::Local<v8::Value> event_name;
+    (void)data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "event")).ToLocal(&event_name);
+
+    // Check for custom rejection handler Symbol.for('nodejs.rejection')
+    v8::Local<v8::Symbol> rej_sym = v8::Symbol::For(p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "nodejs.rejection"));
+    v8::Local<v8::Value> handler_val;
+    if (emitter->Get(context, rej_sym).ToLocal(&handler_val) && handler_val->IsFunction()) {
+        v8::Local<v8::Value> argv[] = { reason, event_name };
+        (void)handler_val.As<v8::Function>()->Call(context, emitter, 2, argv);
+    } else {
+        // Default: emit 'error'
         v8::Local<v8::Value> emit_fn;
         if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_fn) && emit_fn->IsFunction()) {
-            v8::Local<v8::Value> error = args.Length() > 0 ? args[0] : v8::Undefined(p_isolate).As<v8::Value>();
-            v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "error"), error };
-            (void)emit_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
+            v8::Local<v8::Value> emit_argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "error"), reason };
+            (void)emit_fn.As<v8::Function>()->Call(context, emitter, 2, emit_argv);
         }
     }
 }
@@ -396,6 +413,7 @@ void Events::eeEmit(const v8::FunctionCallbackInfo<v8::Value>& args) {
             if (r->IsPromise()) {
                 v8::Local<v8::Object> data = v8::Object::New(p_isolate);
                 (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter"), self);
+                (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "event"), event_name);
                 v8::Local<v8::Function> handler = v8::Function::New(context, asyncRejectionHandler, data).ToLocalChecked();
                 (void)r.As<v8::Promise>()->Catch(context, handler);
             }
@@ -420,6 +438,7 @@ void Events::eeEmit(const v8::FunctionCallbackInfo<v8::Value>& args) {
                     if (r->IsPromise()) {
                         v8::Local<v8::Object> data = v8::Object::New(p_isolate);
                         (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter"), self);
+                        (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "event"), event_name);
                         v8::Local<v8::Function> handler = v8::Function::New(context, asyncRejectionHandler, data).ToLocalChecked();
                         (void)r.As<v8::Promise>()->Catch(context, handler);
                     }
@@ -1058,6 +1077,14 @@ void Events::staticSetDefaultMaxListeners(v8::Local<v8::Name> property, v8::Loca
     if (value->IsNumber()) {
         m_default_max_listeners = value->Int32Value(info.GetIsolate()->GetCurrentContext()).FromMaybe(10);
     }
+}
+
+void Events::staticGetDefaultCaptureRejections(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    info.GetReturnValue().Set(m_default_capture_rejections);
+}
+
+void Events::staticSetDefaultCaptureRejections(v8::Local<v8::Name> property, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<void>& info) {
+    m_default_capture_rejections = value->BooleanValue(info.GetIsolate());
 }
 
 } // namespace module
