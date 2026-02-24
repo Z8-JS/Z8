@@ -9,11 +9,15 @@ namespace module {
 
 int32_t Events::m_default_max_listeners = 10;
 bool Events::m_default_capture_rejections = false;
+bool Events::m_using_domains = false;
 
 v8::Local<v8::ObjectTemplate> Events::createTemplate(v8::Isolate* p_isolate) {
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
 
     v8::Local<v8::FunctionTemplate> ee_tmpl = createEventEmitterTemplate(p_isolate);
+
+    // Static properties
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "usingDomains"), v8::Boolean::New(p_isolate, m_using_domains));
 
     // The module object itself is just a collection of these
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventEmitter"), ee_tmpl);
@@ -21,6 +25,9 @@ v8::Local<v8::ObjectTemplate> Events::createTemplate(v8::Isolate* p_isolate) {
 
     v8::Local<v8::FunctionTemplate> ee_async_tmpl = createEventEmitterAsyncResourceTemplate(p_isolate, ee_tmpl);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventEmitterAsyncResource"), ee_async_tmpl);
+    
+    // Static properties
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "usingDomains"), v8::Boolean::New(p_isolate, m_using_domains));
     
     // Named exports for static utilities
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "once"), v8::FunctionTemplate::New(p_isolate, once));
@@ -30,8 +37,12 @@ v8::Local<v8::ObjectTemplate> Events::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "getMaxListeners"), v8::FunctionTemplate::New(p_isolate, getMaxListeners));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "setMaxListeners"), v8::FunctionTemplate::New(p_isolate, setMaxListeners));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "addAbortListener"), v8::FunctionTemplate::New(p_isolate, addAbortListener));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "stopPropagation"), v8::FunctionTemplate::New(p_isolate, stopPropagation));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "bubbles"), v8::FunctionTemplate::New(p_isolate, bubbles));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Event"), createEventTemplate(p_isolate));
+    
+    v8::Local<v8::FunctionTemplate> event_tmpl = createEventTemplate(p_isolate);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Event"), event_tmpl);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "CustomEvent"), createCustomEventTemplate(p_isolate, event_tmpl));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventTarget"), createEventTargetTemplate(p_isolate));
 
     // Symbols
@@ -82,9 +93,16 @@ v8::Local<v8::FunctionTemplate> Events::createEventEmitterTemplate(v8::Isolate* 
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "getMaxListeners"), v8::FunctionTemplate::New(p_isolate, getMaxListeners));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "setMaxListeners"), v8::FunctionTemplate::New(p_isolate, setMaxListeners));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "addAbortListener"), v8::FunctionTemplate::New(p_isolate, addAbortListener));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "stopPropagation"), v8::FunctionTemplate::New(p_isolate, stopPropagation));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "bubbles"), v8::FunctionTemplate::New(p_isolate, bubbles));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Event"), createEventTemplate(p_isolate));
+    
+    v8::Local<v8::FunctionTemplate> event_tmpl_ee = createEventTemplate(p_isolate);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Event"), event_tmpl_ee);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "CustomEvent"), createCustomEventTemplate(p_isolate, event_tmpl_ee));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventTarget"), createEventTargetTemplate(p_isolate));
+
+    // Static properties on the constructor
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "usingDomains"), v8::Boolean::New(p_isolate, m_using_domains));
 
     // Symbols — same as module-level exports
     v8::Local<v8::Symbol> error_monitor_sym = v8::Symbol::New(
@@ -1226,6 +1244,18 @@ void Events::bubbles(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 }
 
+void Events::stopPropagation(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1 || !args[0]->IsObject()) return;
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> event = args[0].As<v8::Object>();
+    
+    v8::Local<v8::Value> stop_fn;
+    if (event->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "stopPropagation")).ToLocal(&stop_fn) && stop_fn->IsFunction()) {
+        (void)stop_fn.As<v8::Function>()->Call(context, event, 0, nullptr);
+    }
+}
+
 v8::Local<v8::FunctionTemplate> Events::createEventTemplate(v8::Isolate* p_isolate) {
     v8::Local<v8::FunctionTemplate> tmpl = v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
         if (!args.IsConstructCall()) return;
@@ -1233,12 +1263,77 @@ v8::Local<v8::FunctionTemplate> Events::createEventTemplate(v8::Isolate* p_isola
         v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
         if (args.Length() < 1) return;
         v8::Local<v8::Object> self = args.This();
+        
+        bool bubbles = false;
+        bool cancelable = false;
+        if (args.Length() > 1 && args[1]->IsObject()) {
+            v8::Local<v8::Object> options = args[1].As<v8::Object>();
+            v8::Local<v8::Value> b_val, c_val;
+            if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "bubbles")).ToLocal(&b_val)) bubbles = b_val->BooleanValue(p_isolate);
+            if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "cancelable")).ToLocal(&c_val)) cancelable = c_val->BooleanValue(p_isolate);
+        }
+
         (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "type"), args[0]);
-        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "bubbles"), v8::False(p_isolate));
-        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "cancelable"), v8::False(p_isolate));
-        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "timeStamp"), v8::Number::New(p_isolate, 0));
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "bubbles"), v8::Boolean::New(p_isolate, bubbles));
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "cancelable"), v8::Boolean::New(p_isolate, cancelable));
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "defaultPrevented"), v8::False(p_isolate));
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "timeStamp"), v8::Number::New(p_isolate, 0)); // Should be real timestamp
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_stopped"), v8::False(p_isolate));
     });
     tmpl->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "Event"));
+    
+    v8::Local<v8::ObjectTemplate> proto = tmpl->PrototypeTemplate();
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "preventDefault"), v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        v8::Isolate* p_isolate = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+        v8::Local<v8::Value> cancelable;
+        if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "cancelable")).ToLocal(&cancelable) && cancelable->BooleanValue(p_isolate)) {
+            (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "defaultPrevented"), v8::True(p_isolate));
+        }
+    }));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "stopPropagation"), v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        (void)args.This()->Set(args.GetIsolate()->GetCurrentContext(), v8::String::NewFromUtf8Literal(args.GetIsolate(), "_stopped"), v8::True(args.GetIsolate()));
+    }));
+
+    return tmpl;
+}
+
+v8::Local<v8::FunctionTemplate> Events::createCustomEventTemplate(v8::Isolate* p_isolate, v8::Local<v8::FunctionTemplate> event_tmpl) {
+    v8::Local<v8::FunctionTemplate> tmpl = v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (!args.IsConstructCall()) return;
+        v8::Isolate* p_isolate = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+        
+        // Call parent constructor logic (simulated since we are in C++)
+        v8::Local<v8::Value> type = args.Length() > 0 ? args[0] : v8::Undefined(p_isolate).As<v8::Value>();
+        v8::Local<v8::Value> options = args.Length() > 1 ? args[1] : v8::Object::New(p_isolate).As<v8::Value>();
+        
+        // Re-run Event logic
+        bool bubbles = false;
+        bool cancelable = false;
+        v8::Local<v8::Value> detail = v8::Undefined(p_isolate);
+        
+        if (options->IsObject()) {
+            v8::Local<v8::Object> opts = options.As<v8::Object>();
+            v8::Local<v8::Value> b_val, c_val, d_val;
+            if (opts->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "bubbles")).ToLocal(&b_val)) bubbles = b_val->BooleanValue(p_isolate);
+            if (opts->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "cancelable")).ToLocal(&c_val)) cancelable = c_val->BooleanValue(p_isolate);
+            if (opts->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "detail")).ToLocal(&d_val)) detail = d_val;
+        }
+
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "type"), type);
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "bubbles"), v8::Boolean::New(p_isolate, bubbles));
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "cancelable"), v8::Boolean::New(p_isolate, cancelable));
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "detail"), detail);
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "defaultPrevented"), v8::False(p_isolate));
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_stopped"), v8::False(p_isolate));
+    });
+    
+    tmpl->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "CustomEvent"));
+    tmpl->Inherit(event_tmpl);
+    
     return tmpl;
 }
 
@@ -1318,6 +1413,12 @@ v8::Local<v8::FunctionTemplate> Events::createEventTargetTemplate(v8::Isolate* p
             for (uint32_t i = 0; i < arr->Length(); i++) snapshot->Set(context, i, arr->Get(context, i).ToLocalChecked()).Check();
             v8::Local<v8::Value> argv[] = { event };
             for (uint32_t i = 0; i < snapshot->Length(); i++) {
+                // Check if propagation was stopped
+                v8::Local<v8::Value> stopped;
+                if (event->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_stopped")).ToLocal(&stopped) && stopped->BooleanValue(p_isolate)) {
+                    break;
+                }
+                
                 v8::Local<v8::Value> l = snapshot->Get(context, i).ToLocalChecked();
                 if (l->IsFunction()) (void)l.As<v8::Function>()->Call(context, self, 1, argv);
             }

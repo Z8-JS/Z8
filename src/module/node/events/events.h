@@ -20,15 +20,20 @@ class Events {
     static void addAbortListener(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void bubbles(const v8::FunctionCallbackInfo<v8::Value>& args);
 
-    // Event and EventTarget classes
+    // Event, CustomEvent and EventTarget classes
     static v8::Local<v8::FunctionTemplate> createEventTemplate(v8::Isolate* p_isolate);
+    static v8::Local<v8::FunctionTemplate> createCustomEventTemplate(v8::Isolate* p_isolate, v8::Local<v8::FunctionTemplate> event_tmpl);
     static v8::Local<v8::FunctionTemplate> createEventTargetTemplate(v8::Isolate* p_isolate);
+
+    // Static utilities
+    static void stopPropagation(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // EventEmitter class
     static v8::Local<v8::FunctionTemplate> createEventEmitterTemplate(v8::Isolate* p_isolate);
     
     // EventEmitter prototype methods
     static void eeConstructor(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static bool m_using_domains;
     static void eeOn(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void eeOnce(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void eeEmit(const v8::FunctionCallbackInfo<v8::Value>& args);
