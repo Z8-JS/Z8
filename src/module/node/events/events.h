@@ -18,6 +18,11 @@ class Events {
     static void getMaxListeners(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void setMaxListeners(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void addAbortListener(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void bubbles(const v8::FunctionCallbackInfo<v8::Value>& args);
+
+    // Event and EventTarget classes
+    static v8::Local<v8::FunctionTemplate> createEventTemplate(v8::Isolate* p_isolate);
+    static v8::Local<v8::FunctionTemplate> createEventTargetTemplate(v8::Isolate* p_isolate);
 
     // EventEmitter class
     static v8::Local<v8::FunctionTemplate> createEventEmitterTemplate(v8::Isolate* p_isolate);

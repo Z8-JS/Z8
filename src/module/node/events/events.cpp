@@ -30,6 +30,9 @@ v8::Local<v8::ObjectTemplate> Events::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "getMaxListeners"), v8::FunctionTemplate::New(p_isolate, getMaxListeners));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "setMaxListeners"), v8::FunctionTemplate::New(p_isolate, setMaxListeners));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "addAbortListener"), v8::FunctionTemplate::New(p_isolate, addAbortListener));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "bubbles"), v8::FunctionTemplate::New(p_isolate, bubbles));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Event"), createEventTemplate(p_isolate));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventTarget"), createEventTargetTemplate(p_isolate));
 
     // Symbols
     v8::Local<v8::Symbol> error_monitor_sym = v8::Symbol::New(
@@ -78,6 +81,10 @@ v8::Local<v8::FunctionTemplate> Events::createEventEmitterTemplate(v8::Isolate* 
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "getEventListeners"), v8::FunctionTemplate::New(p_isolate, getEventListeners));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "getMaxListeners"), v8::FunctionTemplate::New(p_isolate, getMaxListeners));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "setMaxListeners"), v8::FunctionTemplate::New(p_isolate, setMaxListeners));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "addAbortListener"), v8::FunctionTemplate::New(p_isolate, addAbortListener));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "bubbles"), v8::FunctionTemplate::New(p_isolate, bubbles));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Event"), createEventTemplate(p_isolate));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventTarget"), createEventTargetTemplate(p_isolate));
 
     // Symbols — same as module-level exports
     v8::Local<v8::Symbol> error_monitor_sym = v8::Symbol::New(
@@ -653,6 +660,68 @@ void Events::eeEventNames(const v8::FunctionCallbackInfo<v8::Value>& args) {
 // Static Utilities Implementation
 
 // Helper for events.once resolution
+static void onceCleanup(v8::Isolate* p_isolate, v8::Local<v8::Context> context, v8::Local<v8::Object> data) {
+    v8::Local<v8::Value> emitter_val, name_val, resolve_wrapper_val, error_wrapper_val, abort_listener_val, signal_val;
+    if (!data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter")).ToLocal(&emitter_val) || !emitter_val->IsObject()) return;
+    v8::Local<v8::Object> emitter = emitter_val.As<v8::Object>();
+    
+    (void)data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "name")).ToLocal(&name_val);
+    (void)data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "resolveWrapper")).ToLocal(&resolve_wrapper_val);
+    (void)data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "errorWrapper")).ToLocal(&error_wrapper_val);
+    (void)data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "abortListener")).ToLocal(&abort_listener_val);
+    (void)data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "signal")).ToLocal(&signal_val);
+
+    v8::Local<v8::Value> remove_fn;
+    if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "removeListener")).ToLocal(&remove_fn) && remove_fn->IsFunction()) {
+        if (!resolve_wrapper_val.IsEmpty() && !resolve_wrapper_val->IsUndefined()) {
+            v8::Local<v8::Value> argv[] = { name_val, resolve_wrapper_val };
+            (void)remove_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
+        }
+        if (!error_wrapper_val.IsEmpty() && !error_wrapper_val->IsUndefined()) {
+             v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "error"), error_wrapper_val };
+             (void)remove_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
+        }
+    } else if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "removeEventListener")).ToLocal(&remove_fn) && remove_fn->IsFunction()) {
+         if (!resolve_wrapper_val.IsEmpty() && !resolve_wrapper_val->IsUndefined()) {
+            v8::Local<v8::Value> argv[] = { name_val, resolve_wrapper_val };
+            (void)remove_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
+        }
+    }
+
+    if (!signal_val.IsEmpty() && signal_val->IsObject() && !abort_listener_val.IsEmpty() && abort_listener_val->IsFunction()) {
+        v8::Local<v8::Object> signal = signal_val.As<v8::Object>();
+        v8::Local<v8::Value> r_fn;
+        if (signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "removeEventListener")).ToLocal(&r_fn) && r_fn->IsFunction()) {
+            v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "abort"), abort_listener_val };
+            (void)r_fn.As<v8::Function>()->Call(context, signal, 2, argv);
+        }
+    }
+}
+
+static void onceAbortWrapper(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> data = args.Data().As<v8::Object>();
+
+    v8::Local<v8::Value> resolver_val;
+    if (!data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "resolver")).ToLocal(&resolver_val)) return;
+    v8::Local<v8::Promise::Resolver> resolver = resolver_val.As<v8::Promise::Resolver>();
+
+    v8::Local<v8::Value> signal_val;
+    v8::Local<v8::Value> reason;
+    if (data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "signal")).ToLocal(&signal_val) && signal_val->IsObject()) {
+        (void)signal_val.As<v8::Object>()->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "reason")).ToLocal(&reason);
+    }
+    if (reason.IsEmpty() || reason->IsUndefined()) {
+        v8::Local<v8::Object> err = v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "The operation was aborted")).As<v8::Object>();
+        (void)err->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "name"), v8::String::NewFromUtf8Literal(p_isolate, "AbortError"));
+        reason = err;
+    }
+
+    (void)resolver->Reject(context, reason);
+    onceCleanup(p_isolate, context, data);
+}
+
 static void onceResolveWrapper(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
@@ -662,28 +731,11 @@ static void onceResolveWrapper(const v8::FunctionCallbackInfo<v8::Value>& args) 
     if (!data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "resolver")).ToLocal(&resolver_val)) return;
     v8::Local<v8::Promise::Resolver> resolver = resolver_val.As<v8::Promise::Resolver>();
 
-    // Pack arguments into an array
-    int32_t arg_count = args.Length();
-    v8::Local<v8::Array> arr = v8::Array::New(p_isolate, arg_count);
-    for (int32_t i = 0; i < arg_count; i++) {
-        (void)arr->Set(context, i, args[i]);
-    }
+    v8::Local<v8::Array> arr = v8::Array::New(p_isolate, args.Length());
+    for (int32_t i = 0; i < args.Length(); i++) (void)arr->Set(context, i, args[i]);
     
     (void)resolver->Resolve(context, arr);
-
-    // Cleanup: Remove listeners
-    v8::Local<v8::Value> emitter_val, name_val, error_wrapper_val;
-    if (data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter")).ToLocal(&emitter_val) &&
-        data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "name")).ToLocal(&name_val) &&
-        data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "errorWrapper")).ToLocal(&error_wrapper_val)) {
-        
-        v8::Local<v8::Object> emitter = emitter_val.As<v8::Object>();
-        v8::Local<v8::Value> remove_fn;
-        if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "removeListener")).ToLocal(&remove_fn) && remove_fn->IsFunction()) {
-            v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "error"), error_wrapper_val };
-            (void)remove_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
-        }
-    }
+    onceCleanup(p_isolate, context, data);
 }
 
 static void onceRejectWrapper(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -697,20 +749,7 @@ static void onceRejectWrapper(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::Local<v8::Value> error = args.Length() > 0 ? args[0] : v8::Undefined(p_isolate).As<v8::Value>();
     (void)resolver->Reject(context, error);
-
-    // Cleanup: Remove listeners
-    v8::Local<v8::Value> emitter_val, name_val, resolve_wrapper_val;
-    if (data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter")).ToLocal(&emitter_val) &&
-        data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "name")).ToLocal(&name_val) &&
-        data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "resolveWrapper")).ToLocal(&resolve_wrapper_val)) {
-        
-        v8::Local<v8::Object> emitter = emitter_val.As<v8::Object>();
-        v8::Local<v8::Value> remove_fn;
-        if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "removeListener")).ToLocal(&remove_fn) && remove_fn->IsFunction()) {
-            v8::Local<v8::Value> argv[] = { name_val, resolve_wrapper_val };
-            (void)remove_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
-        }
-    }
+    onceCleanup(p_isolate, context, data);
 }
 
 void Events::once(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -724,6 +763,42 @@ void Events::once(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Local<v8::Promise::Resolver> resolver = v8::Promise::Resolver::New(context).ToLocalChecked();
     args.GetReturnValue().Set(resolver->GetPromise());
 
+    v8::Local<v8::Object> data = v8::Object::New(p_isolate);
+    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "resolver"), resolver);
+    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter"), emitter);
+    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "name"), name);
+
+    // Options support
+    if (args.Length() >= 3 && args[2]->IsObject()) {
+        v8::Local<v8::Object> options = args[2].As<v8::Object>();
+        v8::Local<v8::Value> signal_val;
+        if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "signal")).ToLocal(&signal_val) && signal_val->IsObject()) {
+            v8::Local<v8::Object> signal = signal_val.As<v8::Object>();
+            v8::Local<v8::Value> aborted;
+            if (signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "aborted")).ToLocal(&aborted) && aborted->BooleanValue(p_isolate)) {
+                v8::Local<v8::Value> reason;
+                (void)signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "reason")).ToLocal(&reason);
+                if (reason->IsUndefined()) {
+                    v8::Local<v8::Object> err = v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "The operation was aborted")).As<v8::Object>();
+                    (void)err->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "name"), v8::String::NewFromUtf8Literal(p_isolate, "AbortError"));
+                    reason = err;
+                }
+                (void)resolver->Reject(context, reason);
+                return;
+            }
+            v8::Local<v8::Function> abort_listener = v8::Function::New(context, onceAbortWrapper, data).ToLocalChecked();
+            v8::Local<v8::Value> add_fn;
+            if (signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "addEventListener")).ToLocal(&add_fn) && add_fn->IsFunction()) {
+                v8::Local<v8::Object> o = v8::Object::New(p_isolate);
+                (void)o->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "once"), v8::True(p_isolate));
+                v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "abort"), abort_listener, o };
+                (void)add_fn.As<v8::Function>()->Call(context, signal, 3, argv);
+                (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "signal"), signal);
+                (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "abortListener"), abort_listener);
+            }
+        }
+    }
+
     // Special case: if we are waiting for 'error', it resolves instead of rejecting
     bool is_error_event = false;
     if (name->IsString()) {
@@ -731,28 +806,25 @@ void Events::once(const v8::FunctionCallbackInfo<v8::Value>& args) {
         if (strcmp(*utf8, "error") == 0) is_error_event = true;
     }
 
-    v8::Local<v8::Object> data = v8::Object::New(p_isolate);
-    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "resolver"), resolver);
-    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter"), emitter);
-    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "name"), name);
-
     v8::Local<v8::Function> resolve_wrapper = v8::Function::New(context, onceResolveWrapper, data).ToLocalChecked();
     v8::Local<v8::Function> reject_wrapper = v8::Function::New(context, onceRejectWrapper, data).ToLocalChecked();
 
     (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "resolveWrapper"), resolve_wrapper);
     (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "errorWrapper"), reject_wrapper);
 
-    v8::Local<v8::Value> once_fn;
-    if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "once")).ToLocal(&once_fn) && once_fn->IsFunction()) {
-        // Add success listener
+    v8::Local<v8::Value> on_fn;
+    if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "once")).ToLocal(&on_fn) && on_fn->IsFunction()) {
         v8::Local<v8::Value> argv[] = { name, resolve_wrapper };
-        (void)once_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
-
-        // Add error listener (unless we ARE waiting for error)
+        (void)on_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
         if (!is_error_event) {
             v8::Local<v8::Value> error_argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "error"), reject_wrapper };
-            (void)once_fn.As<v8::Function>()->Call(context, emitter, 2, error_argv);
+            (void)on_fn.As<v8::Function>()->Call(context, emitter, 2, error_argv);
         }
+    } else if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "addEventListener")).ToLocal(&on_fn) && on_fn->IsFunction()) {
+        v8::Local<v8::Object> o = v8::Object::New(p_isolate);
+        (void)o->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "once"), v8::True(p_isolate));
+        v8::Local<v8::Value> argv[] = { name, resolve_wrapper, o };
+        (void)on_fn.As<v8::Function>()->Call(context, emitter, 3, argv);
     }
 }
 
@@ -767,7 +839,9 @@ static v8::Local<v8::Object> createIterResult(v8::Isolate* p_isolate, v8::Local<
 static void iterNext(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
-    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::Object> self;
+    if (args.Data()->IsObject()) self = args.Data().As<v8::Object>();
+    else self = args.This();
 
     v8::Local<v8::Value> error, queue_val, resolvers_val, done_val;
     (void)self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_error")).ToLocal(&error);
@@ -812,7 +886,9 @@ static void iterNext(const v8::FunctionCallbackInfo<v8::Value>& args) {
 static void iterReturn(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
-    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::Object> self;
+    if (args.Data()->IsObject()) self = args.Data().As<v8::Object>();
+    else self = args.This();
 
     (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_done"), v8::True(p_isolate));
 
@@ -922,13 +998,12 @@ void Events::on(const v8::FunctionCallbackInfo<v8::Value>& args) {
     (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_emitter"), emitter);
     (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_name"), name);
 
-    v8::Local<v8::Function> next_fn = v8::Function::New(context, iterNext).ToLocalChecked();
-    v8::Local<v8::Function> return_fn = v8::Function::New(context, iterReturn).ToLocalChecked();
+    v8::Local<v8::Function> next_fn = v8::Function::New(context, iterNext, iterator).ToLocalChecked();
+    v8::Local<v8::Function> return_fn = v8::Function::New(context, iterReturn, iterator).ToLocalChecked();
     (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "next"), next_fn);
     (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "return"), return_fn);
-    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "throw"), return_fn); // Simple throw implementation
+    (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "throw"), return_fn);
 
-    // [Symbol.asyncIterator]
     (void)iterator->Set(context, v8::Symbol::GetAsyncIterator(p_isolate), v8::Function::New(context, [](const v8::FunctionCallbackInfo<v8::Value>& a) {
         a.GetReturnValue().Set(a.This());
     }).ToLocalChecked());
@@ -937,6 +1012,43 @@ void Events::on(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Local<v8::Function> error_listener = v8::Function::New(context, onErrorListener, iterator).ToLocalChecked();
     (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_listener"), listener);
     (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_error_listener"), error_listener);
+
+    if (args.Length() >= 3 && args[2]->IsObject()) {
+        v8::Local<v8::Object> options = args[2].As<v8::Object>();
+        v8::Local<v8::Value> signal_val;
+        if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "signal")).ToLocal(&signal_val) && signal_val->IsObject()) {
+            v8::Local<v8::Object> signal = signal_val.As<v8::Object>();
+            v8::Local<v8::Value> aborted;
+            if (signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "aborted")).ToLocal(&aborted) && aborted->BooleanValue(p_isolate)) {
+                // Done immediately
+                (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_done"), v8::True(p_isolate));
+                v8::Local<v8::Value> reason;
+                (void)signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "reason")).ToLocal(&reason);
+                if (!reason->IsUndefined()) (void)iterator->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_error"), reason);
+                args.GetReturnValue().Set(iterator);
+                return;
+            }
+            v8::Local<v8::Value> add_fn;
+            if (signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "addEventListener")).ToLocal(&add_fn) && add_fn->IsFunction()) {
+                v8::Local<v8::Object> o = v8::Object::New(p_isolate);
+                (void)o->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "once"), v8::True(p_isolate));
+                v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "abort"), return_fn, o };
+                (void)add_fn.As<v8::Function>()->Call(context, signal, 3, argv);
+            }
+        }
+        v8::Local<v8::Value> close_val;
+        if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "close")).ToLocal(&close_val) && close_val->IsArray()) {
+            v8::Local<v8::Array> close_arr = close_val.As<v8::Array>();
+            v8::Local<v8::Value> add_fn;
+            for (uint32_t i = 0; i < close_arr->Length(); i++) {
+                v8::Local<v8::Value> close_name = close_arr->Get(context, i).ToLocalChecked();
+                if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "once")).ToLocal(&add_fn) && add_fn->IsFunction()) {
+                    v8::Local<v8::Value> argv[] = { close_name, return_fn };
+                    (void)add_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
+                }
+            }
+        }
+    }
 
     v8::Local<v8::Value> on_fn;
     if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "on")).ToLocal(&on_fn) && on_fn->IsFunction()) {
@@ -952,6 +1064,9 @@ void Events::on(const v8::FunctionCallbackInfo<v8::Value>& args) {
             v8::Local<v8::Value> error_argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "error"), error_listener };
             (void)on_fn.As<v8::Function>()->Call(context, emitter, 2, error_argv);
         }
+    } else if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "addEventListener")).ToLocal(&on_fn) && on_fn->IsFunction()) {
+        v8::Local<v8::Value> argv[] = { name, listener };
+        (void)on_fn.As<v8::Function>()->Call(context, emitter, 2, argv);
     }
 
     args.GetReturnValue().Set(iterator);
@@ -1067,6 +1182,124 @@ void Events::addAbortListener(const v8::FunctionCallbackInfo<v8::Value>& args) {
         v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "abort"), listener, options };
         (void)add_fn.As<v8::Function>()->Call(context, signal, 3, argv);
     }
+}
+
+void Events::bubbles(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (args.Length() < 1 || !args[0]->IsObject()) {
+        args.GetReturnValue().Set(false);
+        return;
+    }
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> event = args[0].As<v8::Object>();
+    v8::Local<v8::Value> bubbles_val;
+    if (event->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "bubbles")).ToLocal(&bubbles_val)) {
+        args.GetReturnValue().Set(bubbles_val->BooleanValue(p_isolate));
+    } else {
+        args.GetReturnValue().Set(false);
+    }
+}
+
+v8::Local<v8::FunctionTemplate> Events::createEventTemplate(v8::Isolate* p_isolate) {
+    v8::Local<v8::FunctionTemplate> tmpl = v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (!args.IsConstructCall()) return;
+        v8::Isolate* p_isolate = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+        if (args.Length() < 1) return;
+        v8::Local<v8::Object> self = args.This();
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "type"), args[0]);
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "bubbles"), v8::False(p_isolate));
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "cancelable"), v8::False(p_isolate));
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "timeStamp"), v8::Number::New(p_isolate, 0));
+    });
+    tmpl->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "Event"));
+    return tmpl;
+}
+
+v8::Local<v8::FunctionTemplate> Events::createEventTargetTemplate(v8::Isolate* p_isolate) {
+    v8::Local<v8::FunctionTemplate> tmpl = v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (!args.IsConstructCall()) return;
+        args.This()->Set(args.GetIsolate()->GetCurrentContext(), 
+            v8::String::NewFromUtf8Literal(args.GetIsolate(), "_listeners"), 
+            v8::Object::New(args.GetIsolate())).Check();
+    });
+    tmpl->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "EventTarget"));
+    
+    v8::Local<v8::ObjectTemplate> proto = tmpl->PrototypeTemplate();
+    
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "addEventListener"), v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (args.Length() < 2) return;
+        v8::Isolate* p_isolate = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+        v8::Local<v8::Value> listeners_val;
+        if (!self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_listeners")).ToLocal(&listeners_val)) return;
+        v8::Local<v8::Object> listeners = listeners_val.As<v8::Object>();
+        
+        v8::Local<v8::Value> arr_val;
+        if (!listeners->Get(context, args[0]).ToLocal(&arr_val) || !arr_val->IsArray()) {
+            arr_val = v8::Array::New(p_isolate, 0);
+            (void)listeners->Set(context, args[0], arr_val);
+        }
+        v8::Local<v8::Array> arr = arr_val.As<v8::Array>();
+        (void)arr->Set(context, arr->Length(), args[1]);
+    }));
+
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "removeEventListener"), v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (args.Length() < 2) return;
+        v8::Isolate* p_isolate = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+        v8::Local<v8::Value> listeners_val;
+        if (!self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_listeners")).ToLocal(&listeners_val)) return;
+        v8::Local<v8::Object> listeners = listeners_val.As<v8::Object>();
+        
+        v8::Local<v8::Value> arr_val;
+        if (listeners->Get(context, args[0]).ToLocal(&arr_val) && arr_val->IsArray()) {
+            v8::Local<v8::Array> arr = arr_val.As<v8::Array>();
+            for (uint32_t i = 0; i < arr->Length(); i++) {
+                if (arr->Get(context, i).ToLocalChecked()->StrictEquals(args[1])) {
+                    // Primitive removal
+                    v8::Local<v8::Array> new_arr = v8::Array::New(p_isolate, arr->Length() - 1);
+                    for (uint32_t j = 0, k = 0; j < arr->Length(); j++) {
+                        if (j == i) continue;
+                        (void)new_arr->Set(context, k++, arr->Get(context, j).ToLocalChecked());
+                    }
+                    (void)listeners->Set(context, args[0], new_arr);
+                    break;
+                }
+            }
+        }
+    }));
+
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "dispatchEvent"), v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (args.Length() < 1 || !args[0]->IsObject()) { args.GetReturnValue().Set(false); return; }
+        v8::Isolate* p_isolate = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+        v8::Local<v8::Object> event = args[0].As<v8::Object>();
+        v8::Local<v8::Value> type_val;
+        if (!event->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "type")).ToLocal(&type_val)) { args.GetReturnValue().Set(false); return; }
+        
+        v8::Local<v8::Value> listeners_val;
+        if (!self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_listeners")).ToLocal(&listeners_val)) { args.GetReturnValue().Set(true); return; }
+        v8::Local<v8::Object> listeners = listeners_val.As<v8::Object>();
+        
+        v8::Local<v8::Value> arr_val;
+        if (listeners->Get(context, type_val).ToLocal(&arr_val) && arr_val->IsArray()) {
+            v8::Local<v8::Array> arr = arr_val.As<v8::Array>();
+            v8::Local<v8::Array> snapshot = v8::Array::New(p_isolate, arr->Length());
+            for (uint32_t i = 0; i < arr->Length(); i++) snapshot->Set(context, i, arr->Get(context, i).ToLocalChecked()).Check();
+            v8::Local<v8::Value> argv[] = { event };
+            for (uint32_t i = 0; i < snapshot->Length(); i++) {
+                v8::Local<v8::Value> l = snapshot->Get(context, i).ToLocalChecked();
+                if (l->IsFunction()) (void)l.As<v8::Function>()->Call(context, self, 1, argv);
+            }
+        }
+        args.GetReturnValue().Set(true);
+    }));
+
+    return tmpl;
 }
 
 void Events::staticGetDefaultMaxListeners(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info) {
