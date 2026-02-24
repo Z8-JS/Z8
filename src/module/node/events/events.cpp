@@ -1169,19 +1169,45 @@ void Events::addAbortListener(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Local<v8::Object> signal = args[0].As<v8::Object>();
     v8::Local<v8::Function> listener = args[1].As<v8::Function>();
 
+    // Prepare Disposable
+    v8::Local<v8::Object> disposable = v8::Object::New(p_isolate);
+    v8::Local<v8::Object> data = v8::Object::New(p_isolate);
+    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "signal"), signal);
+    (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "listener"), listener);
+
+    v8::Local<v8::Function> dispose_fn = v8::Function::New(context, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        v8::Isolate* p_isolate = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+        v8::Local<v8::Object> data = args.Data().As<v8::Object>();
+        v8::Local<v8::Value> signal_val, listener_val;
+
+        if (data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "signal")).ToLocal(&signal_val) && signal_val->IsObject()) {
+            v8::Local<v8::Object> signal = signal_val.As<v8::Object>();
+            (void)data->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "listener")).ToLocal(&listener_val);
+            v8::Local<v8::Value> remove_fn;
+            if (signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "removeEventListener")).ToLocal(&remove_fn) && remove_fn->IsFunction()) {
+                v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "abort"), listener_val };
+                (void)remove_fn.As<v8::Function>()->Call(context, signal, 2, argv);
+            }
+        }
+    }, data).ToLocalChecked();
+
+    (void)disposable->Set(context, v8::Symbol::GetDispose(p_isolate), dispose_fn);
+
     v8::Local<v8::Value> aborted;
     if (signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "aborted")).ToLocal(&aborted) && aborted->BooleanValue(p_isolate)) {
         (void)listener->Call(context, v8::Undefined(p_isolate), 0, nullptr);
-        return;
+    } else {
+        v8::Local<v8::Value> add_fn;
+        if (signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "addEventListener")).ToLocal(&add_fn) && add_fn->IsFunction()) {
+            v8::Local<v8::Object> options = v8::Object::New(p_isolate);
+            (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "once"), v8::True(p_isolate));
+            v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "abort"), listener, options };
+            (void)add_fn.As<v8::Function>()->Call(context, signal, 3, argv);
+        }
     }
 
-    v8::Local<v8::Value> add_fn;
-    if (signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "addEventListener")).ToLocal(&add_fn) && add_fn->IsFunction()) {
-        v8::Local<v8::Object> options = v8::Object::New(p_isolate);
-        (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "once"), v8::True(p_isolate));
-        v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "abort"), listener, options };
-        (void)add_fn.As<v8::Function>()->Call(context, signal, 3, argv);
-    }
+    args.GetReturnValue().Set(disposable);
 }
 
 void Events::bubbles(const v8::FunctionCallbackInfo<v8::Value>& args) {
