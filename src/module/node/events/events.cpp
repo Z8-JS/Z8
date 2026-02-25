@@ -1197,6 +1197,9 @@ void Events::getEventListeners(const v8::FunctionCallbackInfo<v8::Value>& args) 
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     v8::Local<v8::Object> emitter = args[0]->ToObject(context).ToLocalChecked();
 
+    // 0) Check if it's a native EventTarget (non-Node) or if it has the spec-compliant behavior
+    // Node v24: getEventListeners should work on any EventTarget.
+    
     // 1) EventEmitter / NodeEventTarget with rawListeners()
     v8::Local<v8::Value> fn;
     if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "rawListeners")).ToLocal(&fn) && fn->IsFunction()) {
@@ -1228,6 +1231,9 @@ void Events::getEventListeners(const v8::FunctionCallbackInfo<v8::Value>& args) 
             return;
         }
     }
+
+    // 4) Return empty array instead of undefined if nothing found (Node v24 behavior)
+    args.GetReturnValue().Set(v8::Array::New(p_isolate, 0));
 }
 
 void Events::setMaxListeners(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -1281,6 +1287,16 @@ void Events::getMaxListeners(const v8::FunctionCallbackInfo<v8::Value>& args) {
             return;
         }
     }
+
+    // Node v24: For EventTarget that doesn't have getMaxListeners, return Infinity
+    // (In our case, we return default if it's an EventEmitter-like, but for pure EventTarget it should be Infinity)
+    // We check for _listeners to identify our EventTarget implementation
+    v8::Local<v8::Value> listeners_val;
+    if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_listeners")).ToLocal(&listeners_val) && listeners_val->IsObject()) {
+        args.GetReturnValue().Set(v8::Number::New(p_isolate, std::numeric_limits<double>::infinity()));
+        return;
+    }
+
     args.GetReturnValue().Set(m_default_max_listeners);
 }
 

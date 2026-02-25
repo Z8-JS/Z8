@@ -1,4 +1,4 @@
-import { EventEmitter, errorMonitor } from 'node:events';
+import { EventEmitter, errorMonitor, EventTarget, getEventListeners, getMaxListeners } from 'node:events';
 
 function assert(condition, message) {
     if (!condition) {
@@ -71,11 +71,28 @@ async function testListenerCountOverload() {
     console.log('OK: listenerCount overload functional.');
 }
 
+async function testEventTargetV24() {
+    console.log('Testing EventTarget Node v24 features...');
+    const target = new EventTarget();
+
+    // getEventListeners on EventTarget should return [] instead of undefined
+    const listeners = getEventListeners(target, 'foo');
+    assert(Array.isArray(listeners), 'getEventListeners should return an array');
+    assert(listeners.length === 0, 'getEventListeners should return an empty array for no listeners');
+
+    // getMaxListeners on EventTarget should return Infinity
+    const max = getMaxListeners(target);
+    assert(max === Infinity, `Expected Infinity for EventTarget, got ${max}`);
+
+    console.log('OK: EventTarget Node v24 features functional.');
+}
+
 async function runTests() {
     try {
         await testErrorMonitor();
         await testRemoveAllListenersEmit();
         await testListenerCountOverload();
+        await testEventTargetV24();
         console.log('\nAll new feature tests passed successfully!');
     } catch (err) {
         console.error('\nTest failed!');
