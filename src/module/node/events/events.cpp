@@ -44,6 +44,7 @@ v8::Local<v8::ObjectTemplate> Events::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Event"), event_tmpl);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "CustomEvent"), createCustomEventTemplate(p_isolate, event_tmpl));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventTarget"), createEventTargetTemplate(p_isolate));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "NodeEventTarget"), createNodeEventTargetTemplate(p_isolate));
 
     // Symbols
     v8::Local<v8::Symbol> error_monitor_sym = v8::Symbol::New(
@@ -100,6 +101,7 @@ v8::Local<v8::FunctionTemplate> Events::createEventEmitterTemplate(v8::Isolate* 
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Event"), event_tmpl_ee);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "CustomEvent"), createCustomEventTemplate(p_isolate, event_tmpl_ee));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventTarget"), createEventTargetTemplate(p_isolate));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "NodeEventTarget"), createNodeEventTargetTemplate(p_isolate));
 
     // Static properties on the constructor
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "usingDomains"), v8::Boolean::New(p_isolate, m_using_domains));
@@ -1112,12 +1114,36 @@ void Events::getEventListeners(const v8::FunctionCallbackInfo<v8::Value>& args) 
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     v8::Local<v8::Object> emitter = args[0]->ToObject(context).ToLocalChecked();
-    v8::Local<v8::Value> raw_fn;
-    if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "rawListeners")).ToLocal(&raw_fn) && raw_fn->IsFunction()) {
+
+    // 1) EventEmitter / NodeEventTarget with rawListeners()
+    v8::Local<v8::Value> fn;
+    if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "rawListeners")).ToLocal(&fn) && fn->IsFunction()) {
         v8::Local<v8::Value> argv[] = { args[1] };
         v8::Local<v8::Value> result;
-        if (raw_fn.As<v8::Function>()->Call(context, emitter, 1, argv).ToLocal(&result)) {
+        if (fn.As<v8::Function>()->Call(context, emitter, 1, argv).ToLocal(&result)) {
             args.GetReturnValue().Set(result);
+            return;
+        }
+    }
+
+    // 2) Fallback to listeners() if available
+    if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "listeners")).ToLocal(&fn) && fn->IsFunction()) {
+        v8::Local<v8::Value> argv[] = { args[1] };
+        v8::Local<v8::Value> result;
+        if (fn.As<v8::Function>()->Call(context, emitter, 1, argv).ToLocal(&result)) {
+            args.GetReturnValue().Set(result);
+            return;
+        }
+    }
+
+    // 3) EventTarget / NodeEventTarget: read from internal _listeners map if present
+    v8::Local<v8::Value> listeners_val;
+    if (emitter->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_listeners")).ToLocal(&listeners_val) && listeners_val->IsObject()) {
+        v8::Local<v8::Object> listeners = listeners_val.As<v8::Object>();
+        v8::Local<v8::Value> arr_val;
+        if (listeners->Get(context, args[1]).ToLocal(&arr_val) && arr_val->IsArray()) {
+            args.GetReturnValue().Set(arr_val);
+            return;
         }
     }
 }
@@ -1295,6 +1321,9 @@ v8::Local<v8::FunctionTemplate> Events::createEventTemplate(v8::Isolate* p_isola
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "stopPropagation"), v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
         (void)args.This()->Set(args.GetIsolate()->GetCurrentContext(), v8::String::NewFromUtf8Literal(args.GetIsolate(), "_stopped"), v8::True(args.GetIsolate()));
     }));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "stopImmediatePropagation"), v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        (void)args.This()->Set(args.GetIsolate()->GetCurrentContext(), v8::String::NewFromUtf8Literal(args.GetIsolate(), "_stopped"), v8::True(args.GetIsolate()));
+    }));
 
     return tmpl;
 }
@@ -1424,6 +1453,301 @@ v8::Local<v8::FunctionTemplate> Events::createEventTargetTemplate(v8::Isolate* p
             }
         }
         args.GetReturnValue().Set(true);
+    }));
+
+    return tmpl;
+}
+
+v8::Local<v8::FunctionTemplate> Events::createNodeEventTargetTemplate(v8::Isolate* p_isolate) {
+    // NodeEventTarget extends EventTarget and emulates a subset of EventEmitter API
+    v8::Local<v8::FunctionTemplate> tmpl = v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (!args.IsConstructCall()) return;
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+
+        // Initialise internal listener map (shared shape with EventTarget)
+        (void)self->Set(context,
+            v8::String::NewFromUtf8Literal(p_isolate_inner, "_listeners"),
+            v8::Object::New(p_isolate_inner));
+        // Optional per-instance max listeners for events.setMaxListeners
+        (void)self->Set(context,
+            v8::String::NewFromUtf8Literal(p_isolate_inner, "_maxListeners"),
+            v8::Undefined(p_isolate_inner));
+    });
+
+    tmpl->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "NodeEventTarget"));
+
+    // Prototype: start from EventTarget behavior
+    v8::Local<v8::FunctionTemplate> event_target_tmpl = createEventTargetTemplate(p_isolate);
+    tmpl->Inherit(event_target_tmpl);
+
+    v8::Local<v8::ObjectTemplate> proto = tmpl->PrototypeTemplate();
+
+    // addListener(type, listener) → alias for addEventListener
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "addListener"),
+               v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (args.Length() < 2) return;
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+
+        v8::Local<v8::Value> add_fn;
+        if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate_inner, "addEventListener")).ToLocal(&add_fn) && add_fn->IsFunction()) {
+            v8::Local<v8::Value> argv[] = { args[0], args[1] };
+            (void)add_fn.As<v8::Function>()->Call(context, self, 2, argv);
+        }
+        args.GetReturnValue().Set(self);
+    }));
+
+    // emit(type, arg) → dispatch arg to handlers for type
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "emit"),
+               v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+
+        if (args.Length() < 1) {
+            args.GetReturnValue().Set(false);
+            return;
+        }
+
+        v8::Local<v8::Value> listeners_val;
+        if (!self->Get(context, v8::String::NewFromUtf8Literal(p_isolate_inner, "_listeners")).ToLocal(&listeners_val) || !listeners_val->IsObject()) {
+            args.GetReturnValue().Set(false);
+            return;
+        }
+
+        v8::Local<v8::Object> listeners = listeners_val.As<v8::Object>();
+        v8::Local<v8::Value> arr_val;
+        if (!listeners->Get(context, args[0]).ToLocal(&arr_val) || !arr_val->IsArray()) {
+            args.GetReturnValue().Set(false);
+            return;
+        }
+
+        v8::Local<v8::Array> arr = arr_val.As<v8::Array>();
+        uint32_t len = arr->Length();
+        if (len == 0) {
+            args.GetReturnValue().Set(false);
+            return;
+        }
+
+        // Snapshot to be robust against mutations while emitting
+        v8::Local<v8::Array> snapshot = v8::Array::New(p_isolate_inner, len);
+        for (uint32_t i = 0; i < len; i++) {
+            snapshot->Set(context, i, arr->Get(context, i).ToLocalChecked()).Check();
+        }
+
+        v8::Local<v8::Value> arg = args.Length() > 1 ? args[1] : v8::Undefined(p_isolate_inner).As<v8::Value>();
+        v8::Local<v8::Value> argv[] = { arg };
+
+        for (uint32_t i = 0; i < snapshot->Length(); i++) {
+            v8::Local<v8::Value> l = snapshot->Get(context, i).ToLocalChecked();
+            if (l->IsFunction()) {
+                (void)l.As<v8::Function>()->Call(context, self, 1, argv);
+            }
+        }
+
+        args.GetReturnValue().Set(true);
+    }));
+
+    // on(type, listener) → alias for addListener
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "on"),
+               v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (args.Length() < 2) return;
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+
+        v8::Local<v8::Value> add_fn;
+        if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate_inner, "addListener")).ToLocal(&add_fn) && add_fn->IsFunction()) {
+            v8::Local<v8::Value> argv[] = { args[0], args[1] };
+            (void)add_fn.As<v8::Function>()->Call(context, self, 2, argv);
+        }
+        args.GetReturnValue().Set(self);
+    }));
+
+    // once(type, listener) → addEventListener with { once: true }
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "once"),
+               v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (args.Length() < 2) return;
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+
+        v8::Local<v8::Value> add_fn;
+        if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate_inner, "addEventListener")).ToLocal(&add_fn) && add_fn->IsFunction()) {
+            v8::Local<v8::Object> options = v8::Object::New(p_isolate_inner);
+            (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate_inner, "once"), v8::True(p_isolate_inner));
+            v8::Local<v8::Value> argv[] = { args[0], args[1], options };
+            (void)add_fn.As<v8::Function>()->Call(context, self, 3, argv);
+        }
+        args.GetReturnValue().Set(self);
+    }));
+
+    // removeListener(type, listener) → alias for removeEventListener
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "removeListener"),
+               v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (args.Length() < 2) return;
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+
+        v8::Local<v8::Value> remove_fn;
+        if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate_inner, "removeEventListener")).ToLocal(&remove_fn) && remove_fn->IsFunction()) {
+            v8::Local<v8::Value> argv[] = { args[0], args[1] };
+            (void)remove_fn.As<v8::Function>()->Call(context, self, 2, argv);
+        }
+        args.GetReturnValue().Set(self);
+    }));
+
+    // off(type, listener[, options]) → alias for removeListener (ignore options)
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "off"),
+               v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        if (args.Length() < 2) return;
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+
+        v8::Local<v8::Value> remove_fn;
+        if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate_inner, "removeListener")).ToLocal(&remove_fn) && remove_fn->IsFunction()) {
+            v8::Local<v8::Value> argv[] = { args[0], args[1] };
+            (void)remove_fn.As<v8::Function>()->Call(context, self, 2, argv);
+        }
+        args.GetReturnValue().Set(self);
+    }));
+
+    // removeAllListeners([type])
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "removeAllListeners"),
+               v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+
+        v8::Local<v8::Value> listeners_val;
+        if (!self->Get(context, v8::String::NewFromUtf8Literal(p_isolate_inner, "_listeners")).ToLocal(&listeners_val) || !listeners_val->IsObject()) {
+            args.GetReturnValue().Set(self);
+            return;
+        }
+
+        v8::Local<v8::Object> listeners = listeners_val.As<v8::Object>();
+        if (args.Length() > 0 && !args[0]->IsUndefined()) {
+            (void)listeners->Delete(context, args[0]);
+        } else {
+            (void)self->Set(context,
+                v8::String::NewFromUtf8Literal(p_isolate_inner, "_listeners"),
+                v8::Object::New(p_isolate_inner));
+        }
+        args.GetReturnValue().Set(self);
+    }));
+
+    // eventNames() → keys of _listeners
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "eventNames"),
+               v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+
+        v8::Local<v8::Value> listeners_val;
+        if (!self->Get(context, v8::String::NewFromUtf8Literal(p_isolate_inner, "_listeners")).ToLocal(&listeners_val) || !listeners_val->IsObject()) {
+            args.GetReturnValue().Set(v8::Array::New(p_isolate_inner, 0));
+            return;
+        }
+
+        v8::Local<v8::Object> listeners = listeners_val.As<v8::Object>();
+        v8::Local<v8::Array> props;
+        if (listeners->GetPropertyNames(context).ToLocal(&props)) {
+            args.GetReturnValue().Set(props);
+        } else {
+            args.GetReturnValue().Set(v8::Array::New(p_isolate_inner, 0));
+        }
+    }));
+
+    // listenerCount(type)
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "listenerCount"),
+               v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+
+        if (args.Length() < 1) {
+            args.GetReturnValue().Set(0);
+            return;
+        }
+
+        v8::Local<v8::Value> listeners_val;
+        if (!self->Get(context, v8::String::NewFromUtf8Literal(p_isolate_inner, "_listeners")).ToLocal(&listeners_val) || !listeners_val->IsObject()) {
+            args.GetReturnValue().Set(0);
+            return;
+        }
+
+        v8::Local<v8::Object> listeners = listeners_val.As<v8::Object>();
+        v8::Local<v8::Value> arr_val;
+        if (!listeners->Get(context, args[0]).ToLocal(&arr_val) || !arr_val->IsArray()) {
+            args.GetReturnValue().Set(0);
+            return;
+        }
+
+        args.GetReturnValue().Set(static_cast<int32_t>(arr_val.As<v8::Array>()->Length()));
+    }));
+
+    // setMaxListeners(n)
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "setMaxListeners"),
+               v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        if (args.Length() < 1 || !args[0]->IsNumber()) {
+             p_isolate_inner->ThrowException(v8::Exception::TypeError(
+                 v8::String::NewFromUtf8Literal(p_isolate_inner, "The \"n\" argument must be of type number")));
+             return;
+        }
+        int32_t n = args[0]->Int32Value(context).FromMaybe(-1);
+        if (n < 0) {
+            p_isolate_inner->ThrowException(v8::Exception::RangeError(
+                v8::String::NewFromUtf8Literal(p_isolate_inner, "The value of \"n\" is out of range. It must be >= 0.")));
+            return;
+        }
+        (void)args.This()->Set(context,
+            v8::String::NewFromUtf8Literal(p_isolate_inner, "_maxListeners"),
+            args[0]);
+        args.GetReturnValue().Set(args.This());
+    }));
+
+    // getMaxListeners()
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "getMaxListeners"),
+               v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        v8::Local<v8::Value> val;
+        if (args.This()->Get(context,
+                v8::String::NewFromUtf8Literal(p_isolate_inner, "_maxListeners")).ToLocal(&val) && val->IsNumber()) {
+            args.GetReturnValue().Set(val);
+        } else {
+            args.GetReturnValue().Set(m_default_max_listeners);
+        }
+    }));
+
+    // rawListeners(type) so that events.getEventListeners can use it
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "rawListeners"),
+               v8::FunctionTemplate::New(p_isolate, [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        v8::Isolate* p_isolate_inner = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate_inner->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+
+        v8::Local<v8::Value> listeners_val;
+        if (!self->Get(context, v8::String::NewFromUtf8Literal(p_isolate_inner, "_listeners")).ToLocal(&listeners_val) || !listeners_val->IsObject()) {
+            args.GetReturnValue().Set(v8::Array::New(p_isolate_inner, 0));
+            return;
+        }
+
+        v8::Local<v8::Object> listeners = listeners_val.As<v8::Object>();
+        v8::Local<v8::Value> arr_val;
+        if (!listeners->Get(context, args[0]).ToLocal(&arr_val) || !arr_val->IsArray()) {
+            args.GetReturnValue().Set(v8::Array::New(p_isolate_inner, 0));
+            return;
+        }
+
+        args.GetReturnValue().Set(arr_val);
     }));
 
     return tmpl;

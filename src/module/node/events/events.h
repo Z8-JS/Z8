@@ -24,6 +24,7 @@ class Events {
     static v8::Local<v8::FunctionTemplate> createEventTemplate(v8::Isolate* p_isolate);
     static v8::Local<v8::FunctionTemplate> createCustomEventTemplate(v8::Isolate* p_isolate, v8::Local<v8::FunctionTemplate> event_tmpl);
     static v8::Local<v8::FunctionTemplate> createEventTargetTemplate(v8::Isolate* p_isolate);
+    static v8::Local<v8::FunctionTemplate> createNodeEventTargetTemplate(v8::Isolate* p_isolate);
 
     // Static utilities
     static void stopPropagation(const v8::FunctionCallbackInfo<v8::Value>& args);
