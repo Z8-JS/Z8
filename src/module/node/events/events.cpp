@@ -73,7 +73,8 @@ v8::Local<v8::FunctionTemplate> Events::createEventEmitterTemplate(v8::Isolate* 
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "emit"), v8::FunctionTemplate::New(p_isolate, eeEmit));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "removeListener"), v8::FunctionTemplate::New(p_isolate, eeRemoveListener));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "off"), v8::FunctionTemplate::New(p_isolate, eeRemoveListener));
-    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "removeAllListeners"), v8::FunctionTemplate::New(p_isolate, eeRemoveAllListeners));
+    v8::Local<v8::FunctionTemplate> ee_remove_all_listeners_tmpl = v8::FunctionTemplate::New(p_isolate, eeRemoveAllListeners);
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "removeAllListeners"), ee_remove_all_listeners_tmpl);
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "setMaxListeners"), v8::FunctionTemplate::New(p_isolate, eeSetMaxListeners));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "getMaxListeners"), v8::FunctionTemplate::New(p_isolate, eeGetMaxListeners));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "listeners"), v8::FunctionTemplate::New(p_isolate, eeListeners));
@@ -86,6 +87,7 @@ v8::Local<v8::FunctionTemplate> Events::createEventEmitterTemplate(v8::Isolate* 
     // Static properties on the constructor
     tmpl->SetNativeDataProperty(v8::String::NewFromUtf8Literal(p_isolate, "defaultMaxListeners"), staticGetDefaultMaxListeners, staticSetDefaultMaxListeners);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventEmitter"), tmpl);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "usingDomains"), v8::Boolean::New(p_isolate, m_using_domains));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "once"), v8::FunctionTemplate::New(p_isolate, once));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "on"), v8::FunctionTemplate::New(p_isolate, on));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "listenerCount"), v8::FunctionTemplate::New(p_isolate, listenerCount));
@@ -96,6 +98,10 @@ v8::Local<v8::FunctionTemplate> Events::createEventEmitterTemplate(v8::Isolate* 
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "stopPropagation"), v8::FunctionTemplate::New(p_isolate, stopPropagation));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "bubbles"), v8::FunctionTemplate::New(p_isolate, bubbles));
     
+    // Static properties on the constructor (continued)
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "usingDomains"), v8::Boolean::New(p_isolate, m_using_domains));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "init"), v8::FunctionTemplate::New(p_isolate, eeInit));
+    
     v8::Local<v8::FunctionTemplate> event_tmpl_ee = createEventTemplate(p_isolate);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Event"), event_tmpl_ee);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "CustomEvent"), createCustomEventTemplate(p_isolate, event_tmpl_ee));
@@ -105,18 +111,22 @@ v8::Local<v8::FunctionTemplate> Events::createEventEmitterTemplate(v8::Isolate* 
     // Static properties on the constructor
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "usingDomains"), v8::Boolean::New(p_isolate, m_using_domains));
 
-    // Symbols — same as module-level exports
-    v8::Local<v8::Symbol> error_monitor_sym = v8::Symbol::For(
+    v8::Local<v8::Symbol> error_monitor_sym_ee = v8::Symbol::For(
         p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "events.errorMonitor"));
-    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "errorMonitor"), error_monitor_sym);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "errorMonitor"), error_monitor_sym_ee);
 
+    // Symbols — same as module-level exports
     v8::Local<v8::Symbol> capture_rejection_sym = v8::Symbol::For(
         p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "nodejs.rejection"));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "captureRejectionSymbol"), capture_rejection_sym);
 
-    // Explicit Resource Management (Symbol.dispose)
+    // Explicit Resource Management (Symbol.dispose and Symbol.asyncDispose)
     v8::Local<v8::Symbol> dispose_sym = v8::Symbol::GetDispose(p_isolate);
-    proto->Set(dispose_sym, v8::FunctionTemplate::New(p_isolate, eeRemoveAllListeners));
+    v8::Local<v8::Symbol> async_dispose_sym = v8::Symbol::GetAsyncDispose(p_isolate);
+    
+    // Use the template defined earlier in the prototype section
+    proto->Set(dispose_sym, ee_remove_all_listeners_tmpl);
+    proto->Set(async_dispose_sym, ee_remove_all_listeners_tmpl);
 
     tmpl->SetNativeDataProperty(v8::String::NewFromUtf8Literal(p_isolate, "captureRejections"),
                                 staticGetDefaultCaptureRejections, staticSetDefaultCaptureRejections);
@@ -194,6 +204,7 @@ static void addListenerInternal(v8::Isolate* p_isolate, v8::Local<v8::Object> se
     v8::Local<v8::Value> emit_val;
     if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_val) && emit_val->IsFunction()) {
         v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "newListener"), event, listener };
+        // Node compatibility: Ensure 'newListener' is emitted BEFORE adding to internal storage
         (void)emit_val.As<v8::Function>()->Call(context, self, 3, argv);
     }
 
@@ -561,6 +572,7 @@ void Events::eeRemoveListener(const v8::FunctionCallbackInfo<v8::Value>& args) {
         v8::Local<v8::Value> emit_val;
         if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_val) && emit_val->IsFunction()) {
             v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "removeListener"), event, listener };
+            // Node compatibility: Ensure 'removeListener' is emitted AFTER removal
             (void)emit_val.As<v8::Function>()->Call(context, self, 3, argv);
         }
     }
@@ -1849,6 +1861,16 @@ v8::Local<v8::FunctionTemplate> Events::createNodeEventTargetTemplate(v8::Isolat
     }));
 
     return tmpl;
+}
+
+void Events::eeInit(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    // Node.js internal init() often used to re-initialize an instance or setup internal state
+    // For our C++ implementation, the constructor already does this.
+    // We provide this for compatibility.
+    if (args.Length() > 0 && args.This()->IsObject()) {
+        eeConstructor(args);
+    }
+    args.GetReturnValue().Set(args.This());
 }
 
 void Events::staticGetDefaultMaxListeners(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info) {

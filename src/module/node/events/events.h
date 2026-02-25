@@ -62,6 +62,8 @@ class Events {
     
     static void staticGetDefaultCaptureRejections(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info);
     static void staticSetDefaultCaptureRejections(v8::Local<v8::Name> property, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<void>& info);
+    
+    static void eeInit(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module

@@ -87,12 +87,60 @@ async function testEventTargetV24() {
     console.log('OK: EventTarget Node v24 features functional.');
 }
 
+async function testEEV24Deep() {
+    console.log('Testing deep EventEmitter Node v24 features...');
+    
+    // Test EventEmitter.init()
+    const ee = new EventEmitter();
+    if (typeof EventEmitter.init === 'function') {
+        EventEmitter.init.call(ee);
+        console.log('OK: EventEmitter.init static exists.');
+    }
+
+    // Test EventEmitter.usingDomains
+    assert(typeof EventEmitter.usingDomains === 'boolean', 'EventEmitter.usingDomains should be a boolean');
+    console.log('OK: EventEmitter.usingDomains exists.');
+
+    // Test Symbol.asyncDispose
+    const asyncDispose = Symbol.asyncDispose || Symbol.for('Symbol.asyncDispose');
+    if (typeof ee[asyncDispose] === 'function') {
+        await ee[asyncDispose]();
+        console.log('OK: EventEmitter[Symbol.asyncDispose] functional.');
+    }
+
+    // Test 'newListener' / 'removeListener' order (Node v24 behavior)
+    let order = [];
+    const ee2 = new EventEmitter();
+    ee2.on('newListener', (event) => {
+        if (event === 'test') {
+            order.push('newListener');
+            assert(ee2.listenerCount('test') === 0, 'newListener should be emitted BEFORE adding');
+        }
+    });
+    const listener = () => {};
+    ee2.on('test', listener);
+    order.push('added');
+
+    ee2.on('removeListener', (event) => {
+        if (event === 'test') {
+            order.push('removeListener');
+            assert(ee2.listenerCount('test') === 0, 'removeListener should be emitted AFTER removal');
+        }
+    });
+    ee2.removeListener('test', listener);
+    order.push('removed');
+
+    assert(JSON.stringify(order) === JSON.stringify(['newListener', 'added', 'removeListener', 'removed']), 'Wrong event order');
+    console.log('OK: Event emission order correct.');
+}
+
 async function runTests() {
     try {
         await testErrorMonitor();
         await testRemoveAllListenersEmit();
         await testListenerCountOverload();
         await testEventTargetV24();
+        await testEEV24Deep();
         console.log('\nAll new feature tests passed successfully!');
     } catch (err) {
         console.error('\nTest failed!');
