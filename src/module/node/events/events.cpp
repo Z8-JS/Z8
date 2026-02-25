@@ -26,10 +26,10 @@ v8::Local<v8::ObjectTemplate> Events::createTemplate(v8::Isolate* p_isolate) {
     v8::Local<v8::FunctionTemplate> ee_async_tmpl = createEventEmitterAsyncResourceTemplate(p_isolate, ee_tmpl);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventEmitterAsyncResource"), ee_async_tmpl);
     
-    // Static properties
+    // Node v24: Static properties on events module
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "usingDomains"), v8::Boolean::New(p_isolate, m_using_domains));
-    
-    // Named exports for static utilities
+    tmpl->SetNativeDataProperty(v8::String::NewFromUtf8Literal(p_isolate, "defaultMaxListeners"), staticGetDefaultMaxListeners, staticSetDefaultMaxListeners);
+    tmpl->SetNativeDataProperty(v8::String::NewFromUtf8Literal(p_isolate, "captureRejections"), staticGetDefaultCaptureRejections, staticSetDefaultCaptureRejections);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "once"), v8::FunctionTemplate::New(p_isolate, once));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "on"), v8::FunctionTemplate::New(p_isolate, on));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "listenerCount"), v8::FunctionTemplate::New(p_isolate, listenerCount));
@@ -141,6 +141,7 @@ void Events::eeConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     v8::Local<v8::Object> self = args.This();
     
+    (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_eventsCount"), v8::Integer::New(p_isolate, 0));
     v8::Local<v8::Object> events_obj = v8::Object::New(p_isolate);
     self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_events"), events_obj).Check();
     self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_maxListeners"), v8::Undefined(p_isolate)).Check();
@@ -209,8 +210,10 @@ static void addListenerInternal(v8::Isolate* p_isolate, v8::Local<v8::Object> se
     }
 
     v8::Local<v8::Value> existing;
+    bool is_new = false;
     if (!events_obj->Get(context, event).ToLocal(&existing) || existing->IsUndefined()) {
         events_obj->Set(context, event, listener).Check();
+        is_new = true;
     } else if (existing->IsFunction()) {
         v8::Local<v8::Array> arr = v8::Array::New(p_isolate, 2);
         if (prepend) {
@@ -234,6 +237,15 @@ static void addListenerInternal(v8::Isolate* p_isolate, v8::Local<v8::Object> se
         } else {
             arr->Set(context, arr->Length(), listener).Check();
         }
+    }
+
+    if (is_new) {
+        v8::Local<v8::Value> count_val;
+        int32_t count = 0;
+        if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_eventsCount")).ToLocal(&count_val) && count_val->IsNumber()) {
+            count = count_val->Int32Value(context).FromMaybe(0);
+        }
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_eventsCount"), v8::Integer::New(p_isolate, count + 1));
     }
 
     // Check MaxListeners limit
@@ -569,6 +581,19 @@ void Events::eeRemoveListener(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     if (removed) {
+        // Update _eventsCount if event was completely removed
+        v8::Local<v8::Value> check_existing;
+        if (!events_obj->Get(context, event).ToLocal(&check_existing) || check_existing->IsUndefined()) {
+            v8::Local<v8::Value> count_val;
+            int32_t count = 0;
+            if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_eventsCount")).ToLocal(&count_val) && count_val->IsNumber()) {
+                count = count_val->Int32Value(context).FromMaybe(0);
+            }
+            if (count > 0) {
+                (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_eventsCount"), v8::Integer::New(p_isolate, count - 1));
+            }
+        }
+
         v8::Local<v8::Value> emit_val;
         if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_val) && emit_val->IsFunction()) {
             v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "removeListener"), event, listener };
@@ -614,6 +639,14 @@ void Events::eeRemoveAllListeners(const v8::FunctionCallbackInfo<v8::Value>& arg
                 }
             }
             events_obj->Delete(context, event).Check();
+            v8::Local<v8::Value> count_val;
+            int32_t count = 0;
+            if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_eventsCount")).ToLocal(&count_val) && count_val->IsNumber()) {
+                count = count_val->Int32Value(context).FromMaybe(0);
+            }
+            if (count > 0) {
+                (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_eventsCount"), v8::Integer::New(p_isolate, count - 1));
+            }
         }
     } else {
         if (has_emit) {
@@ -637,6 +670,7 @@ void Events::eeRemoveAllListeners(const v8::FunctionCallbackInfo<v8::Value>& arg
             }
         }
         self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_events"), v8::Object::New(p_isolate)).Check();
+        (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_eventsCount"), v8::Integer::New(p_isolate, 0));
     }
     args.GetReturnValue().Set(self);
 }

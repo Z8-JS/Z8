@@ -101,6 +101,23 @@ async function testEEV24Deep() {
     assert(typeof EventEmitter.usingDomains === 'boolean', 'EventEmitter.usingDomains should be a boolean');
     console.log('OK: EventEmitter.usingDomains exists.');
 
+    // Test internal _eventsCount
+    assert(ee._eventsCount === 0, 'Initial _eventsCount should be 0');
+    const l1 = () => {};
+    ee.on('a', l1);
+    assert(ee._eventsCount === 1, `_eventsCount should be 1, got ${ee._eventsCount}`);
+    ee.on('a', () => {});
+    assert(ee._eventsCount === 1, 'Adding second listener to same event should NOT increase _eventsCount');
+    ee.on('b', () => {});
+    assert(ee._eventsCount === 2, 'Adding different event should increase _eventsCount');
+    ee.removeListener('a', l1);
+    assert(ee._eventsCount === 2, 'Removing one listener (still has others) should NOT decrease _eventsCount');
+    ee.removeAllListeners('a');
+    assert(ee._eventsCount === 1, 'Removing all listeners for an event should decrease _eventsCount');
+    ee.removeAllListeners();
+    assert(ee._eventsCount === 0, 'removeAllListeners() should reset _eventsCount to 0');
+    console.log('OK: _eventsCount internal property functional.');
+
     // Test Symbol.asyncDispose
     const asyncDispose = Symbol.asyncDispose || Symbol.for('Symbol.asyncDispose');
     if (typeof ee[asyncDispose] === 'function') {
