@@ -46,8 +46,7 @@ v8::Local<v8::ObjectTemplate> Events::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "EventTarget"), createEventTargetTemplate(p_isolate));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "NodeEventTarget"), createNodeEventTargetTemplate(p_isolate));
 
-    // Symbols
-    v8::Local<v8::Symbol> error_monitor_sym = v8::Symbol::New(
+    v8::Local<v8::Symbol> error_monitor_sym = v8::Symbol::For(
         p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "events.errorMonitor"));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "errorMonitor"), error_monitor_sym);
 
@@ -107,7 +106,7 @@ v8::Local<v8::FunctionTemplate> Events::createEventEmitterTemplate(v8::Isolate* 
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "usingDomains"), v8::Boolean::New(p_isolate, m_using_domains));
 
     // Symbols — same as module-level exports
-    v8::Local<v8::Symbol> error_monitor_sym = v8::Symbol::New(
+    v8::Local<v8::Symbol> error_monitor_sym = v8::Symbol::For(
         p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "events.errorMonitor"));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "errorMonitor"), error_monitor_sym);
 
@@ -407,6 +406,31 @@ void Events::eeEmit(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::Local<v8::Object> events_obj = events_val.As<v8::Object>();
     v8::Local<v8::Value> handlers;
+
+    // Support events.errorMonitor
+    if (event_name->IsString()) {
+        v8::String::Utf8Value ev(p_isolate, event_name);
+        if (strcmp(*ev, "error") == 0) {
+            v8::Local<v8::Symbol> error_monitor_sym = v8::Symbol::For(
+                p_isolate, v8::String::NewFromUtf8Literal(p_isolate, "events.errorMonitor"));
+            v8::Local<v8::Value> monitor_handlers;
+            if (events_obj->Get(context, error_monitor_sym).ToLocal(&monitor_handlers) && !monitor_handlers->IsUndefined()) {
+                std::vector<v8::Local<v8::Value>> monitor_argv;
+                for (int32_t i = 1; i < args.Length(); i++) monitor_argv.push_back(args[i]);
+                if (monitor_handlers->IsFunction()) {
+                    (void)monitor_handlers.As<v8::Function>()->Call(context, self, (int32_t)monitor_argv.size(), monitor_argv.data());
+                } else if (monitor_handlers->IsArray()) {
+                    v8::Local<v8::Array> m_arr = monitor_handlers.As<v8::Array>();
+                    uint32_t m_len = m_arr->Length();
+                    for (uint32_t i = 0; i < m_len; i++) {
+                        v8::Local<v8::Value> h_val = m_arr->Get(context, i).ToLocalChecked();
+                        if (h_val->IsFunction()) (void)h_val.As<v8::Function>()->Call(context, self, (int32_t)monitor_argv.size(), monitor_argv.data());
+                    }
+                }
+            }
+        }
+    }
+
     if (!events_obj->Get(context, event_name).ToLocal(&handlers) || handlers->IsUndefined()) {
         if (event_name->IsString()) {
             v8::String::Utf8Value ev(p_isolate, event_name);
@@ -556,9 +580,50 @@ void Events::eeRemoveAllListeners(const v8::FunctionCallbackInfo<v8::Value>& arg
     }
     v8::Local<v8::Object> events_obj = events_val.As<v8::Object>();
 
+    v8::Local<v8::Value> emit_val;
+    bool has_emit = self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_val) && emit_val->IsFunction();
+
     if (args.Length() > 0 && !args[0]->IsUndefined()) {
-        events_obj->Delete(context, args[0]).Check();
+        v8::Local<v8::Value> event = args[0];
+        v8::Local<v8::Value> handlers;
+        if (events_obj->Get(context, event).ToLocal(&handlers) && !handlers->IsUndefined()) {
+            if (has_emit) {
+                v8::Local<v8::Function> emit_fn = emit_val.As<v8::Function>();
+                if (handlers->IsFunction()) {
+                    v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "removeListener"), event, handlers };
+                    (void)emit_fn->Call(context, self, 3, argv);
+                } else if (handlers->IsArray()) {
+                    v8::Local<v8::Array> arr = handlers.As<v8::Array>();
+                    uint32_t len = arr->Length();
+                    for (uint32_t i = 0; i < len; i++) {
+                        v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "removeListener"), event, arr->Get(context, i).ToLocalChecked() };
+                        (void)emit_fn->Call(context, self, 3, argv);
+                    }
+                }
+            }
+            events_obj->Delete(context, event).Check();
+        }
     } else {
+        if (has_emit) {
+            v8::Local<v8::Function> emit_fn = emit_val.As<v8::Function>();
+            v8::Local<v8::Array> names;
+            if (events_obj->GetPropertyNames(context).ToLocal(&names)) {
+                for (uint32_t i = 0; i < names->Length(); i++) {
+                    v8::Local<v8::Value> event = names->Get(context, i).ToLocalChecked();
+                    v8::Local<v8::Value> handlers = events_obj->Get(context, event).ToLocalChecked();
+                    if (handlers->IsFunction()) {
+                        v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "removeListener"), event, handlers };
+                        (void)emit_fn->Call(context, self, 3, argv);
+                    } else if (handlers->IsArray()) {
+                        v8::Local<v8::Array> arr = handlers.As<v8::Array>();
+                        for (uint32_t j = 0; j < arr->Length(); j++) {
+                            v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "removeListener"), event, arr->Get(context, j).ToLocalChecked() };
+                            (void)emit_fn->Call(context, self, 3, argv);
+                        }
+                    }
+                }
+            }
+        }
         self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_events"), v8::Object::New(p_isolate)).Check();
     }
     args.GetReturnValue().Set(self);
@@ -646,13 +711,30 @@ void Events::eeRawListeners(const v8::FunctionCallbackInfo<v8::Value>& args) {
 void Events::eeListenerCount(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::Value> event_name;
+
+    if (args.Length() == 0) {
+        args.GetReturnValue().Set(0);
+        return;
+    }
+
+    // Node compat: if args[0] is emitter-like and args[1] is eventName, use static behavior
+    if (args.Length() >= 2 && args[0]->IsObject() && (args[1]->IsString() || args[1]->IsSymbol())) {
+        listenerCount(args);
+        return;
+    }
+    
+    event_name = args[0];
+
     v8::Local<v8::Value> events_val;
-    if (!args.This()->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_events")).ToLocal(&events_val) || !events_val->IsObject()) {
+    if (!self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "_events")).ToLocal(&events_val) || !events_val->IsObject()) {
         args.GetReturnValue().Set(0);
         return;
     }
     v8::Local<v8::Value> h;
-    if (!events_val.As<v8::Object>()->Get(context, args[0]).ToLocal(&h) || h->IsUndefined()) {
+    if (!events_val.As<v8::Object>()->Get(context, event_name).ToLocal(&h) || h->IsUndefined()) {
         args.GetReturnValue().Set(0);
         return;
     }
