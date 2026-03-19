@@ -10,11 +10,12 @@ namespace module {
 int32_t Events::m_default_max_listeners = 10;
 bool Events::m_default_capture_rejections = false;
 bool Events::m_using_domains = false;
+v8::Persistent<v8::FunctionTemplate> Events::m_ee_tmpl;
 
 v8::Local<v8::ObjectTemplate> Events::createTemplate(v8::Isolate* p_isolate) {
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
 
-    v8::Local<v8::FunctionTemplate> ee_tmpl = createEventEmitterTemplate(p_isolate);
+    v8::Local<v8::FunctionTemplate> ee_tmpl = getEventEmitterTemplate(p_isolate);
 
     // Static properties
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "usingDomains"), v8::Boolean::New(p_isolate, m_using_domains));
@@ -1896,11 +1897,7 @@ v8::Local<v8::FunctionTemplate> Events::createNodeEventTargetTemplate(v8::Isolat
 
     return tmpl;
 }
-
 void Events::eeInit(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    // Node.js internal init() often used to re-initialize an instance or setup internal state
-    // For our C++ implementation, the constructor already does this.
-    // We provide this for compatibility.
     if (args.Length() > 0 && args.This()->IsObject()) {
         eeConstructor(args);
     }
@@ -1923,6 +1920,13 @@ void Events::staticGetDefaultCaptureRejections(v8::Local<v8::Name> property, con
 
 void Events::staticSetDefaultCaptureRejections(v8::Local<v8::Name> property, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<void>& info) {
     m_default_capture_rejections = value->BooleanValue(info.GetIsolate());
+}
+
+v8::Local<v8::FunctionTemplate> Events::getEventEmitterTemplate(v8::Isolate* p_isolate) {
+    if (m_ee_tmpl.IsEmpty()) {
+        m_ee_tmpl.Reset(p_isolate, createEventEmitterTemplate(p_isolate));
+    }
+    return m_ee_tmpl.Get(p_isolate);
 }
 
 } // namespace module

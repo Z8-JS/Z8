@@ -1,4 +1,6 @@
 #include "fs.h"
+#include "../stream/stream.h"
+#include "../buffer/buffer.h"
 #include "../../adaptive_io.h"
 #include <chrono>
 #include <fcntl.h> // For O_* constants
@@ -287,6 +289,9 @@ v8::Local<v8::ObjectTemplate> FS::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "statfs"), v8::FunctionTemplate::New(p_isolate, FS::statfs));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "lutimes"), v8::FunctionTemplate::New(p_isolate, FS::lutimes));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "opendir"), v8::FunctionTemplate::New(p_isolate, FS::opendir));
+ 
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createReadStream"), v8::FunctionTemplate::New(p_isolate, FS::createReadStream));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "createWriteStream"), v8::FunctionTemplate::New(p_isolate, FS::createWriteStream));
 
     // Expose fs.promises
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "promises"), createPromisesTemplate(p_isolate));
@@ -6555,6 +6560,204 @@ void FS::writevPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         TaskQueue::getInstance().enqueue(p_task);
     });
 }
+  
+struct ReadStreamInternal : public z8::module::StreamInternal {
+    int32_t m_fd = -1;
+    bool m_auto_close = true;
+
+    ~ReadStreamInternal() override {
+        if (m_auto_close && m_fd != -1) {
+#ifdef _WIN32
+            _close(m_fd);
+#else
+            close(m_fd);
+#endif
+            m_fd = -1;
+        }
+    }
+};
+
+static void readStream_read(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::Data> internal_data = self->GetInternalField(0);
+    if (internal_data.IsEmpty() || !internal_data.As<v8::Value>()->IsExternal()) return;
+    ReadStreamInternal* p_ctx = static_cast<ReadStreamInternal*>(internal_data.As<v8::External>()->Value());
+
+    if (p_ctx->m_fd == -1 || p_ctx->m_reading) return;
+    p_ctx->m_reading = true;
+
+    size_t size = p_ctx->m_high_water_mark;
+    if (args.Length() > 0 && args[0]->IsNumber()) {
+        size = static_cast<size_t>(args[0]->Uint32Value(context).FromMaybe(static_cast<uint32_t>(size)));
+    }
+
+    std::vector<uint8_t> buffer(size);
+    int32_t bytes_read;
+#ifdef _WIN32
+    bytes_read = _read(p_ctx->m_fd, buffer.data(), (uint32_t)size);
+#else
+    bytes_read = read(p_ctx->m_fd, buffer.data(), size);
+#endif
+
+    p_ctx->m_reading = false;
+
+    v8::Local<v8::Value> push_fn;
+    if (!self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "push")).ToLocal(&push_fn) || !push_fn->IsFunction()) {
+        return;
+    }
+
+    if (bytes_read <= 0) {
+        v8::Local<v8::Value> push_argv[] = { v8::Null(p_isolate) };
+        (void)push_fn.As<v8::Function>()->Call(context, self, 1, push_argv);
+        return;
+    }
+
+    v8::Local<v8::Uint8Array> ui8 = z8::module::Buffer::createBuffer(p_isolate, bytes_read);
+    memcpy(ui8->Buffer()->GetBackingStore()->Data(), buffer.data(), bytes_read);
+
+    v8::Local<v8::Value> push_argv[] = { ui8 };
+    (void)push_fn.As<v8::Function>()->Call(context, self, 1, push_argv);
+}
+
+void FS::createReadStream(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+
+    if (args.Length() < 1 || !args[0]->IsString()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "Path must be a string")));
+        return;
+    }
+
+    v8::String::Utf8Value path_val(p_isolate, args[0]);
+    std::string path = *path_val;
+
+    int32_t fd = -1;
+#ifdef _WIN32
+    fd = _open(path.c_str(), _O_RDONLY | _O_BINARY);
+#else
+    fd = open(path.c_str(), O_RDONLY);
+#endif
+
+    if (fd == -1) {
+        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "Failed to open file")));
+        return;
+    }
+
+    auto p_ctx = new ReadStreamInternal();
+    p_ctx->m_fd = fd;
+    p_ctx->m_is_readable = true;
+
+    v8::Local<v8::FunctionTemplate> readable_tmpl = z8::module::Stream::getReadableTemplate(p_isolate);
+    v8::Local<v8::Object> js_obj;
+    if (!readable_tmpl->GetFunction(context).ToLocalChecked()->NewInstance(context).ToLocal(&js_obj)) return;
+    
+    v8::Local<v8::Data> old_internal = js_obj->GetInternalField(0);
+    if (!old_internal.IsEmpty() && old_internal->IsValue() && old_internal.As<v8::Value>()->IsExternal()) {
+        delete static_cast<z8::module::StreamInternal*>(old_internal.As<v8::External>()->Value());
+    }
+    js_obj->SetInternalField(0, v8::External::New(p_isolate, p_ctx));
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_read"), v8::FunctionTemplate::New(p_isolate, readStream_read)->GetFunction(context).ToLocalChecked()).Check();
+
+    v8::Global<v8::Object> global_self(p_isolate, js_obj);
+    global_self.SetWeak(p_ctx, [](const v8::WeakCallbackInfo<ReadStreamInternal>& data) {
+        delete data.GetParameter();
+    }, v8::WeakCallbackType::kParameter);
+
+    args.GetReturnValue().Set(js_obj);
+}
+
+struct WriteStreamInternal : public z8::module::StreamInternal {
+    int32_t m_fd = -1;
+    bool m_auto_close = true;
+
+    ~WriteStreamInternal() override {
+        if (m_auto_close && m_fd != -1) {
+#ifdef _WIN32
+            _close(m_fd);
+#else
+            close(m_fd);
+#endif
+            m_fd = -1;
+        }
+    }
+};
+
+static void writeStream_write(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::Data> internal_data = self->GetInternalField(0);
+    if (internal_data.IsEmpty() || !internal_data.As<v8::Value>()->IsExternal()) return;
+    WriteStreamInternal* p_ctx = static_cast<WriteStreamInternal*>(internal_data.As<v8::External>()->Value());
+
+    if (p_ctx->m_fd == -1) return;
+
+    if (args.Length() > 0 && args[0]->IsUint8Array()) {
+        v8::Local<v8::Uint8Array> ui8 = args[0].As<v8::Uint8Array>();
+        const uint8_t* p_data = static_cast<const uint8_t*>(ui8->Buffer()->GetBackingStore()->Data()) + ui8->ByteOffset();
+        size_t len = ui8->ByteLength();
+#ifdef _WIN32
+        _write(p_ctx->m_fd, p_data, (uint32_t)len);
+#else
+        write(p_ctx->m_fd, p_data, len);
+#endif
+    }
+
+    if (args.Length() > 2 && args[2]->IsFunction()) {
+        v8::Local<v8::Function> cb = args[2].As<v8::Function>();
+        (void)cb->Call(context, v8::Null(p_isolate), 0, nullptr);
+    }
+}
+
+void FS::createWriteStream(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+
+    if (args.Length() < 1 || !args[0]->IsString()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8Literal(p_isolate, "Path must be a string")));
+        return;
+    }
+
+    v8::String::Utf8Value path_val(p_isolate, args[0]);
+    std::string path = *path_val;
+
+    int32_t fd = -1;
+#ifdef _WIN32
+    fd = _open(path.c_str(), _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, 0666);
+#else
+    fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+#endif
+
+    if (fd == -1) {
+        p_isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "Failed to open file")));
+        return;
+    }
+
+    auto p_ctx = new WriteStreamInternal();
+    p_ctx->m_fd = fd;
+    p_ctx->m_is_writable = true;
+
+    v8::Local<v8::FunctionTemplate> writable_tmpl = z8::module::Stream::getWritableTemplate(p_isolate);
+    v8::Local<v8::Object> js_obj;
+    if (!writable_tmpl->GetFunction(context).ToLocalChecked()->NewInstance(context).ToLocal(&js_obj)) return;
+    
+    v8::Local<v8::Data> old_internal = js_obj->GetInternalField(0);
+    if (!old_internal.IsEmpty() && old_internal->IsValue() && old_internal.As<v8::Value>()->IsExternal()) {
+        delete static_cast<z8::module::StreamInternal*>(old_internal.As<v8::External>()->Value());
+    }
+    js_obj->SetInternalField(0, v8::External::New(p_isolate, p_ctx));
+    js_obj->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_write"), v8::FunctionTemplate::New(p_isolate, writeStream_write)->GetFunction(context).ToLocalChecked()).Check();
+
+    v8::Global<v8::Object> global_self(p_isolate, js_obj);
+    global_self.SetWeak(p_ctx, [](const v8::WeakCallbackInfo<WriteStreamInternal>& data) {
+        delete data.GetParameter();
+    }, v8::WeakCallbackType::kParameter);
+
+    args.GetReturnValue().Set(js_obj);
+}
 
 } // namespace module
 } // namespace z8
+

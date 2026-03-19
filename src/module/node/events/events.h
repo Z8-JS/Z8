@@ -7,8 +7,12 @@ namespace z8 {
 namespace module {
 
 class Events {
+  private:
+    static v8::Persistent<v8::FunctionTemplate> m_ee_tmpl;
+
   public:
     static v8::Local<v8::ObjectTemplate> createTemplate(v8::Isolate* p_isolate);
+    static v8::Local<v8::FunctionTemplate> getEventEmitterTemplate(v8::Isolate* p_isolate);
 
     // Static utilities
     static void once(const v8::FunctionCallbackInfo<v8::Value>& args);
