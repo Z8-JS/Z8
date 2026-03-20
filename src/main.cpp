@@ -813,3 +813,4 @@ int main(int argc, char* argv[]) {
     z8::Runtime::Shutdown();
     return success ? 0 : 1;
 }
+
