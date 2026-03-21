@@ -17,6 +17,7 @@ v8::Persistent<v8::FunctionTemplate> Stream::m_readable_tmpl;
 v8::Persistent<v8::FunctionTemplate> Stream::m_writable_tmpl;
 v8::Persistent<v8::FunctionTemplate> Stream::m_duplex_tmpl;
 v8::Persistent<v8::FunctionTemplate> Stream::m_transform_tmpl;
+v8::Persistent<v8::FunctionTemplate> Stream::m_passthrough_tmpl;
 
 v8::Local<v8::ObjectTemplate> Stream::createTemplate(v8::Isolate* p_isolate) {
     v8::Local<v8::ObjectTemplate> tmpl = v8::ObjectTemplate::New(p_isolate);
@@ -25,11 +26,13 @@ v8::Local<v8::ObjectTemplate> Stream::createTemplate(v8::Isolate* p_isolate) {
     v8::Local<v8::FunctionTemplate> writable_tmpl = getWritableTemplate(p_isolate);
     v8::Local<v8::FunctionTemplate> duplex_tmpl = getDuplexTemplate(p_isolate);
     v8::Local<v8::FunctionTemplate> transform_tmpl = getTransformTemplate(p_isolate);
+    v8::Local<v8::FunctionTemplate> passthrough_tmpl = getPassThroughTemplate(p_isolate);
 
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Readable"), readable_tmpl);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Writable"), writable_tmpl);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Duplex"), duplex_tmpl);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Transform"), transform_tmpl);
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "PassThrough"), passthrough_tmpl);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "pipeline"), v8::FunctionTemplate::New(p_isolate, pipeline));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "finished"), v8::FunctionTemplate::New(p_isolate, finished));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "compose"), v8::FunctionTemplate::New(p_isolate, compose));
@@ -102,6 +105,19 @@ v8::Local<v8::FunctionTemplate> Stream::createReadableTemplate(v8::Isolate* p_is
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "unshift"), v8::FunctionTemplate::New(p_isolate, readableUnshift));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "wrap"), v8::FunctionTemplate::New(p_isolate, readableWrap));
     
+    // Collection methods
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "map"), v8::FunctionTemplate::New(p_isolate, readableMap));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "filter"), v8::FunctionTemplate::New(p_isolate, readableFilter));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "forEach"), v8::FunctionTemplate::New(p_isolate, readableForEach));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "toArray"), v8::FunctionTemplate::New(p_isolate, readableToArray));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "some"), v8::FunctionTemplate::New(p_isolate, readableSome));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "find"), v8::FunctionTemplate::New(p_isolate, readableFind));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "every"), v8::FunctionTemplate::New(p_isolate, readableEvery));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "flatMap"), v8::FunctionTemplate::New(p_isolate, readableFlatMap));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "drop"), v8::FunctionTemplate::New(p_isolate, readableDrop));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "take"), v8::FunctionTemplate::New(p_isolate, readableTake));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "reduce"), v8::FunctionTemplate::New(p_isolate, readableReduce));
+    
     // Property accessors
     proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "readable"), 
         v8::FunctionTemplate::New(p_isolate, getReadableProperty));
@@ -117,6 +133,12 @@ v8::Local<v8::FunctionTemplate> Stream::createReadableTemplate(v8::Isolate* p_is
         v8::FunctionTemplate::New(p_isolate, getReadableEnded));
     proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "readableObjectMode"), 
         v8::FunctionTemplate::New(p_isolate, getReadableObjectMode));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "closed"), 
+        v8::FunctionTemplate::New(p_isolate, getReadableClosed));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "destroyed"), 
+        v8::FunctionTemplate::New(p_isolate, getReadableDestroyed));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "errored"), 
+        v8::FunctionTemplate::New(p_isolate, getReadableErrored));
 
     return tmpl;
 }
@@ -423,6 +445,12 @@ v8::Local<v8::FunctionTemplate> Stream::createWritableTemplate(v8::Isolate* p_is
         v8::FunctionTemplate::New(p_isolate, getWritableFinished));
     proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableNeedDrain"), 
         v8::FunctionTemplate::New(p_isolate, getWritableNeedDrain));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "closed"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableClosed));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "destroyed"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableDestroyed));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "errored"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableErrored));
 
     return tmpl;
 }
@@ -584,10 +612,34 @@ v8::Local<v8::FunctionTemplate> Stream::createDuplexTemplate(v8::Isolate* p_isol
     tmpl->Inherit(readable_tmpl); // Duplex inherits from Readable in Node
     tmpl->InstanceTemplate()->SetInternalFieldCount(1);
     
+    // Static methods
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "from"), v8::FunctionTemplate::New(p_isolate, duplexFrom));
+    
     v8::Local<v8::ObjectTemplate> proto = tmpl->PrototypeTemplate();
     // Mix in Writable methods
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "write"), v8::FunctionTemplate::New(p_isolate, writableWrite));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "end"), v8::FunctionTemplate::New(p_isolate, writableEnd));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "cork"), v8::FunctionTemplate::New(p_isolate, writableCork));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "uncork"), v8::FunctionTemplate::New(p_isolate, writableUncork));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "setDefaultEncoding"), v8::FunctionTemplate::New(p_isolate, writableSetDefaultEncoding));
+    
+    // Mix in Writable property accessors
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writable"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableProperty));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableHighWaterMark"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableHighWaterMark));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableLength"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableLength));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableObjectMode"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableObjectMode));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableCorked"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableCorked));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableEnded"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableEnded));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableFinished"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableFinished));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableNeedDrain"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableNeedDrain));
     
     return tmpl;
 }
@@ -1389,6 +1441,155 @@ void Stream::setDefaultHighWaterMark(const v8::FunctionCallbackInfo<v8::Value>& 
     } else {
         s_default_high_water_mark = value;
     }
+}
+
+
+// Additional Stream implementations - to be appended to stream.cpp
+
+// --- PassThrough Stream ---
+
+v8::Local<v8::FunctionTemplate> Stream::getPassThroughTemplate(v8::Isolate* p_isolate) {
+    if (m_passthrough_tmpl.IsEmpty()) {
+        v8::Local<v8::FunctionTemplate> transform_tmpl = getTransformTemplate(p_isolate);
+        m_passthrough_tmpl.Reset(p_isolate, createPassThroughTemplate(p_isolate, transform_tmpl));
+    }
+    return m_passthrough_tmpl.Get(p_isolate);
+}
+
+v8::Local<v8::FunctionTemplate> Stream::createPassThroughTemplate(v8::Isolate* p_isolate, v8::Local<v8::FunctionTemplate> transform_tmpl) {
+    v8::Local<v8::FunctionTemplate> tmpl = v8::FunctionTemplate::New(p_isolate, passThroughConstructor);
+    tmpl->SetClassName(v8::String::NewFromUtf8Literal(p_isolate, "PassThrough"));
+    tmpl->Inherit(transform_tmpl);
+    tmpl->InstanceTemplate()->SetInternalFieldCount(1);
+    return tmpl;
+}
+
+void Stream::passThroughConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    transformConstructor(args);
+}
+
+// --- Duplex.from ---
+
+void Stream::duplexFrom(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    
+    // TODO: Implement proper conversion from various sources to Duplex
+    p_isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8Literal(p_isolate, "Duplex.from() not yet fully implemented")));
+}
+
+// --- Additional Property Getters ---
+
+void Stream::getReadableClosed(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_closed);
+}
+
+void Stream::getReadableDestroyed(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_destroyed);
+}
+
+void Stream::getReadableErrored(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_errored ? v8::True(p_isolate) : v8::Null(p_isolate));
+}
+
+void Stream::getWritableClosed(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_closed);
+}
+
+void Stream::getWritableDestroyed(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_destroyed);
+}
+
+void Stream::getWritableErrored(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_errored ? v8::True(p_isolate) : v8::Null(p_isolate));
+}
+
+// --- Readable Collection Methods ---
+
+void Stream::readableMap(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8Literal(p_isolate, "Readable.map() not yet implemented")));
+}
+
+void Stream::readableFilter(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8Literal(p_isolate, "Readable.filter() not yet implemented")));
+}
+
+void Stream::readableForEach(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8Literal(p_isolate, "Readable.forEach() not yet implemented")));
+}
+
+void Stream::readableToArray(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8Literal(p_isolate, "Readable.toArray() not yet implemented")));
+}
+
+void Stream::readableSome(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8Literal(p_isolate, "Readable.some() not yet implemented")));
+}
+
+void Stream::readableFind(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8Literal(p_isolate, "Readable.find() not yet implemented")));
+}
+
+void Stream::readableEvery(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8Literal(p_isolate, "Readable.every() not yet implemented")));
+}
+
+void Stream::readableFlatMap(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8Literal(p_isolate, "Readable.flatMap() not yet implemented")));
+}
+
+void Stream::readableDrop(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8Literal(p_isolate, "Readable.drop() not yet implemented")));
+}
+
+void Stream::readableTake(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8Literal(p_isolate, "Readable.take() not yet implemented")));
+}
+
+void Stream::readableReduce(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    p_isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8Literal(p_isolate, "Readable.reduce() not yet implemented")));
 }
 
 } // namespace module

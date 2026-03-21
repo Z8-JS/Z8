@@ -77,6 +77,76 @@ Destroys the stream. Optionally emits an 'error' event and emits a 'close' event
 
 Sets the character encoding for data read from the Readable stream.
 
+### Collection Methods
+
+The following methods allow treating a Readable stream as an iterable collection:
+
+#### `readable.map(fn[, options])`
+
+Creates a new stream with the results of calling a provided function on every chunk.
+
+**Status**: Not yet implemented
+
+#### `readable.filter(fn[, options])`
+
+Creates a new stream with all chunks that pass the test implemented by the provided function.
+
+**Status**: Not yet implemented
+
+#### `readable.forEach(fn[, options])`
+
+Calls a function for each chunk in the stream.
+
+**Status**: Not yet implemented
+
+#### `readable.toArray([options])`
+
+Collects all chunks from the stream into an array.
+
+**Status**: Not yet implemented
+
+#### `readable.some(fn[, options])`
+
+Tests whether at least one chunk in the stream passes the test implemented by the provided function.
+
+**Status**: Not yet implemented
+
+#### `readable.find(fn[, options])`
+
+Returns the first chunk in the stream that satisfies the provided testing function.
+
+**Status**: Not yet implemented
+
+#### `readable.every(fn[, options])`
+
+Tests whether all chunks in the stream pass the test implemented by the provided function.
+
+**Status**: Not yet implemented
+
+#### `readable.flatMap(fn[, options])`
+
+Creates a new stream by applying a function to each chunk and flattening the result.
+
+**Status**: Not yet implemented
+
+#### `readable.drop(limit[, options])`
+
+Drops the first `limit` chunks from the stream.
+
+**Status**: Not yet implemented
+
+#### `readable.take(limit[, options])`
+
+Takes the first `limit` chunks from the stream.
+
+**Status**: Not yet implemented
+
+#### `readable.reduce(fn[, initial[, options]])`
+
+Reduces the stream to a single value by executing a reducer function for each chunk.
+
+**Status**: Not yet implemented
+
 ### Static Methods
 
 #### `stream.Readable.from(iterable[, options])`
@@ -119,6 +189,18 @@ Becomes `true` when 'end' event is emitted.
 #### `readable.readableObjectMode`
 
 Returns `true` if the stream is operating in object mode.
+
+#### `readable.closed`
+
+Is `true` after 'close' has been emitted.
+
+#### `readable.destroyed`
+
+Is `true` after `readable.destroy()` has been called.
+
+#### `readable.errored`
+
+Returns error if the stream has been destroyed with an error.
 
 ### Events
 
@@ -206,6 +288,18 @@ Is set to `true` immediately before the 'finish' event is emitted.
 
 Is `true` if the stream's buffer has been full and stream will emit 'drain'.
 
+#### `writable.closed`
+
+Is `true` after 'close' has been emitted.
+
+#### `writable.destroyed`
+
+Is `true` after `writable.destroy()` has been called.
+
+#### `writable.errored`
+
+Returns error if the stream has been destroyed with an error.
+
 ### Events
 
 - `'drain'`: Emitted when it is appropriate to resume writing data to the stream
@@ -226,6 +320,14 @@ new stream.Duplex([options]);
 ```
 
 Inherits all methods and properties from both Readable and Writable.
+
+### Static Methods
+
+#### `stream.Duplex.from(src)`
+
+Creates a Duplex stream from various sources (readable stream, writable stream, web streams, etc.).
+
+**Status**: Not yet fully implemented
 
 ## Class: stream.Transform
 
@@ -252,6 +354,29 @@ const upperCaseTransform = new Transform({
     callback();
   }
 });
+```
+
+## Class: stream.PassThrough
+
+PassThrough is a trivial implementation of a Transform stream that simply passes the input bytes across to the output. Its purpose is mainly for examples and testing, but there are some use cases where it can be useful as a building block for novel sorts of streams.
+
+### Constructor
+
+```js
+new stream.PassThrough([options]);
+```
+
+### Example
+
+```js
+const { PassThrough } = require('node:stream');
+const pass = new PassThrough();
+
+pass.write('hello ');
+pass.write('world');
+pass.end();
+
+pass.pipe(process.stdout);
 ```
 
 ## Utility Functions

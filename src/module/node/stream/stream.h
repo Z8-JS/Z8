@@ -38,6 +38,7 @@ class Stream {
     static v8::Persistent<v8::FunctionTemplate> m_writable_tmpl;
     static v8::Persistent<v8::FunctionTemplate> m_duplex_tmpl;
     static v8::Persistent<v8::FunctionTemplate> m_transform_tmpl;
+    static v8::Persistent<v8::FunctionTemplate> m_passthrough_tmpl;
 
   public:
     static v8::Local<v8::ObjectTemplate> createTemplate(v8::Isolate* p_isolate);
@@ -61,6 +62,19 @@ class Stream {
     static void readableUnshift(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void readableWrap(const v8::FunctionCallbackInfo<v8::Value>& args);
     
+    // Readable collection methods
+    static void readableMap(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readableFilter(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readableForEach(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readableToArray(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readableSome(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readableFind(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readableEvery(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readableFlatMap(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readableDrop(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readableTake(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readableReduce(const v8::FunctionCallbackInfo<v8::Value>& args);
+    
     // Readable property getters
     static void getReadableProperty(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void getReadableFlowing(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -69,12 +83,16 @@ class Stream {
     static void getReadableEncoding(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void getReadableEnded(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void getReadableObjectMode(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void getReadableClosed(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void getReadableDestroyed(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void getReadableErrored(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Helpers for other modules
     static v8::Local<v8::FunctionTemplate> getReadableTemplate(v8::Isolate* p_isolate);
     static v8::Local<v8::FunctionTemplate> getWritableTemplate(v8::Isolate* p_isolate);
     static v8::Local<v8::FunctionTemplate> getDuplexTemplate(v8::Isolate* p_isolate);
     static v8::Local<v8::FunctionTemplate> getTransformTemplate(v8::Isolate* p_isolate);
+    static v8::Local<v8::FunctionTemplate> getPassThroughTemplate(v8::Isolate* p_isolate);
 
     // Writable methods
     static v8::Local<v8::FunctionTemplate> createWritableTemplate(v8::Isolate* p_isolate, v8::Local<v8::FunctionTemplate> ee_tmpl);
@@ -95,15 +113,21 @@ class Stream {
     static void getWritableEnded(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void getWritableFinished(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void getWritableNeedDrain(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void getWritableClosed(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void getWritableDestroyed(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void getWritableErrored(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Duplex and Transform
     static v8::Local<v8::FunctionTemplate> createDuplexTemplate(v8::Isolate* p_isolate, v8::Local<v8::FunctionTemplate> readable_tmpl, v8::Local<v8::FunctionTemplate> writable_tmpl);
     static v8::Local<v8::FunctionTemplate> createTransformTemplate(v8::Isolate* p_isolate, v8::Local<v8::FunctionTemplate> duplex_tmpl);
+    static v8::Local<v8::FunctionTemplate> createPassThroughTemplate(v8::Isolate* p_isolate, v8::Local<v8::FunctionTemplate> transform_tmpl);
     static void duplexConstructor(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void transformConstructor(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void passThroughConstructor(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void transformTransform(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void transformFlush(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void transformWrite(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void duplexFrom(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Internal Helpers
     static void pipeline(const v8::FunctionCallbackInfo<v8::Value>& args);
