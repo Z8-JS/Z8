@@ -373,14 +373,6 @@ void Stream::streamUnpipe(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(args.This());
 }
 
-void Stream::writableCork(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    args.GetReturnValue().Set(args.This());
-}
-
-void Stream::writableUncork(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    args.GetReturnValue().Set(args.This());
-}
-
 void Stream::writableSetDefaultEncoding(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(args.This());
 }
@@ -1050,12 +1042,10 @@ void Stream::finishedPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 }
 
-} // namespace module
-} // namespace z8
-
 // --- Readable Property Getters ---
 
 void Stream::getReadableProperty(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Object> self = args.This();
     v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
     StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
@@ -1400,3 +1390,6 @@ void Stream::setDefaultHighWaterMark(const v8::FunctionCallbackInfo<v8::Value>& 
         s_default_high_water_mark = value;
     }
 }
+
+} // namespace module
+} // namespace z8

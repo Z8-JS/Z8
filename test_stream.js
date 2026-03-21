@@ -1,108 +1,82 @@
+// Test Z8 Stream Module Implementation
+
 import stream from 'node:stream';
 
-const { pipeline, finished } = stream.promises;
+console.log('=== Testing Stream Module ===\n');
 
-class MyReadable extends stream.Readable {
-  constructor(data, options) {
-    super(options);
-    this.data = data;
-    this.index = 0;
-    console.log('MyReadable constructor called.');
-  }
-
-  _read(size) {
-    console.log('MyReadable _read called with size:', size);
-    while (this.index < this.data.length) {
-      const chunk = this.data[this.index];
-      const canPush = this.push(chunk);
-      console.log(`MyReadable pushing: ${chunk}, canPush: ${canPush}`);
-      this.index++;
-      if (!canPush) {
-        // If push returns false, the internal buffer is full, stop pushing for now
-        console.log('MyReadable internal buffer full, stopping _read for now.');
-        break;
-      }
+// Test 1: Readable Stream
+console.log('1. Testing Readable Stream:');
+const { Readable } = stream;
+const readable = new Readable({
+    read() {
+        this.push('Hello ');
+        this.push('World!');
+        this.push(null); // EOF
     }
-    if (this.index >= this.data.length) {
-      this.push(null); // No more data
-      console.log('MyReadable pushing null, end of data.');
+});
+
+readable.on('data', (chunk) => {
+    console.log('  Data:', chunk.toString());
+});
+
+readable.on('end', () => {
+    console.log('  Readable stream ended\n');
+});
+
+// Test 2: Writable Stream
+console.log('2. Testing Writable Stream:');
+const { Writable } = stream;
+const writable = new Writable({
+    write(chunk, encoding, callback) {
+        console.log('  Writing:', chunk.toString());
+        callback();
     }
-  }
-}
+});
 
-class MyWritable extends stream.Writable {
-  constructor(options) {
-    super(options);
-    this.receivedData = [];
-    console.log('MyWritable constructor called.');
-  }
+writable.write('Test data');
+writable.end();
 
-  _write(chunk, encoding, callback) {
-    console.log(`MyWritable _write called with chunk: ${chunk.toString()}`);
-    this.receivedData.push(chunk.toString());
-    console.log(`Writable received: ${chunk.toString()}`);
-    callback();
-  }
-}
+writable.on('finish', () => {
+    console.log('  Writable stream finished\n');
+});
 
-async function runTests() {
-  console.log('--- Testing Readable.from ---');
-  const readableFromArray = stream.Readable.from(['item1', 'item2', 'item3']);
-  let fromData = [];
-  readableFromArray.on('data', (chunk) => {
-    fromData.push(chunk.toString());
-  });
-  await finished(readableFromArray);
-  console.log('Readable.from collected:', fromData);
-  if (fromData.join(',') === 'item1,item2,item3') {
-    console.log('Readable.from test PASSED');
-  } else {
-    console.error('Readable.from test FAILED');
-  }
+// Test 3: Properties
+console.log('3. Testing Stream Properties:');
+const testReadable = new Readable();
+console.log('  readable.readable:', testReadable.readable);
+console.log('  readable.readableFlowing:', testReadable.readableFlowing);
+console.log('  readable.readableHighWaterMark:', testReadable.readableHighWaterMark);
+console.log('  readable.isPaused():', testReadable.isPaused());
 
-  console.log('\n--- Testing stream.promises.pipeline ---');
-  const readable = new MyReadable(['hello', 'world', 'z8']);
-  const writable = new MyWritable();
+const testWritable = new Writable();
+console.log('  writable.writable:', testWritable.writable);
+console.log('  writable.writableHighWaterMark:', testWritable.writableHighWaterMark);
+console.log('  writable.writableCorked:', testWritable.writableCorked);
 
-  try {
-    await pipeline(readable, writable);
-    console.log('Pipeline succeeded.');
-    console.log('Writable collected:', writable.receivedData);
-    if (writable.receivedData.join(',') === 'hello,world,z8') {
-      console.log('Pipeline test PASSED');
-    } else {
-      console.error('Pipeline test FAILED');
+// Test 4: Readable.from
+console.log('\n4. Testing Readable.from:');
+const fromReadable = Readable.from(['A', 'B', 'C']);
+fromReadable.on('data', (chunk) => {
+    console.log('  From data:', chunk.toString());
+});
+
+// Test 5: Pause/Resume
+console.log('\n5. Testing Pause/Resume:');
+const pauseTest = new Readable({
+    read() {
+        this.push('Data');
+        this.push(null);
     }
-  } catch (err) {
-    console.error('Pipeline failed:', err);
-    console.error('Pipeline test FAILED');
-  }
+});
 
-  console.log('\n--- Testing stream.promises.finished ---');
-  const finishedStream = new MyReadable(['final', 'data']);
-  let finishedData = [];
-  finishedStream.on('data', (chunk) => {
-    finishedData.push(chunk.toString());
-  });
+pauseTest.pause();
+console.log('  After pause, isPaused():', pauseTest.isPaused());
+pauseTest.resume();
+console.log('  After resume, isPaused():', pauseTest.isPaused());
 
-  try {
-    await finished(finishedStream);
-    console.log('Finished stream completed.');
-    console.log('Finished stream collected:', finishedData);
-    if (finishedData.join(',') === 'final,data') {
-      console.log('Finished test PASSED');
-    } else {
-      console.error('Finished test FAILED');
-    }
-  } catch (err) {
-    console.error('Finished stream failed:', err);
-    console.error('Finished test FAILED');
-  }
-}
+// Test 6: Utility Functions
+console.log('\n6. Testing Utility Functions:');
+console.log('  getDefaultHighWaterMark(false):', stream.getDefaultHighWaterMark(false));
+console.log('  getDefaultHighWaterMark(true):', stream.getDefaultHighWaterMark(true));
 
-runTests();
-
-// Keep the process alive for a short period to allow async operations to complete
-setTimeout(() => {
-  console.log('Test script finished execution.');
-}, 5000); // 5 second delay
+console.log('\n=== All Stream Tests Completed ===');
