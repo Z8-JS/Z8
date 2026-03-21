@@ -523,7 +523,7 @@ class Runtime {
         // Event Loop
         bool keep_running = true;
         while (keep_running) {
-            // 1. Process Tasks from Thread Pool
+            // 1. Process Tasks from TaskQueue
             while (!z8::TaskQueue::getInstance().isEmpty()) {
                 z8::Task* p_task = z8::TaskQueue::getInstance().dequeue();
                 if (p_task) {
@@ -553,22 +553,30 @@ class Runtime {
             }
 
             // 3. Final termination check
-            if (!z8::module::Timer::hasActiveTimers() && z8::TaskQueue::getInstance().isEmpty() &&
-                !z8::ThreadPool::getInstance().hasPendingTasks()) {
+            bool has_work = z8::module::Timer::hasActiveTimers() ||
+                            !z8::TaskQueue::getInstance().isEmpty() ||
+                            z8::ThreadPool::getInstance().hasPendingTasks();
+
+            if (!has_work) {
                 // One last check for microtasks that might have been queued
                 p_isolate->PerformMicrotaskCheckpoint();
 
-                if (z8::TaskQueue::getInstance().isEmpty() && !z8::ThreadPool::getInstance().hasPendingTasks()) {
+                // Re-check after microtask checkpoint
+                has_work = z8::module::Timer::hasActiveTimers() ||
+                           !z8::TaskQueue::getInstance().isEmpty() ||
+                           z8::ThreadPool::getInstance().hasPendingTasks();
+                
+                if (!has_work) {
                     keep_running = false;
                 }
             }
 
-            // 4. Wait for work (Instant Wakeup)
-            if (keep_running && z8::TaskQueue::getInstance().isEmpty()) {
+            // 4. Wait for work if nothing is pending
+            if (keep_running && !has_work) { // Only wait if there's truly nothing to do
                 std::chrono::milliseconds delay = z8::module::Timer::getNextDelay();
-                std::chrono::milliseconds timeout(50); // Balanced polling
+                std::chrono::milliseconds timeout(10); // Always wait for a small duration
                 if (delay.count() >= 0) {
-                    timeout = std::chrono::milliseconds(std::min(static_cast<int64_t>(delay.count()), 50LL));
+                    timeout = std::chrono::milliseconds(std::min(static_cast<int64_t>(delay.count()), 10LL));
                 }
                 z8::TaskQueue::getInstance().wait(timeout);
             }

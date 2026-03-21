@@ -4,6 +4,7 @@
 #include "v8.h"
 #include "../events/events.h"
 #include <vector> // Added for std::vector
+#include <cstdint>
 
 namespace z8 {
 namespace module {
@@ -18,7 +19,7 @@ struct StreamInternal {
     bool m_ended = false;
     bool m_destroyed = false;
     bool m_paused = true;
-    size_t m_high_water_mark = 16 * 1024; // 16KB default
+    uint32_t m_high_water_mark = 16 * 1024; // 16KB default
     std::vector<uint8_t> m_buffer;
     uint64_t m_bytes_read = 0;
     uint64_t m_bytes_written = 0;
@@ -48,6 +49,7 @@ class Stream {
     static void readableResume(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void readableDestroy(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void readableSetEncoding(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void readableFrom(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Helpers for other modules
     static v8::Local<v8::FunctionTemplate> getReadableTemplate(v8::Isolate* p_isolate);
@@ -70,13 +72,17 @@ class Stream {
     static v8::Local<v8::FunctionTemplate> createTransformTemplate(v8::Isolate* p_isolate, v8::Local<v8::FunctionTemplate> duplex_tmpl);
     static void duplexConstructor(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void transformConstructor(const v8::FunctionCallbackInfo<v8::Value>& args);
-    static void transform_transform(const v8::FunctionCallbackInfo<v8::Value>& args);
-    static void transform_flush(const v8::FunctionCallbackInfo<v8::Value>& args);
-    static void transform_write(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void transformTransform(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void transformFlush(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void transformWrite(const v8::FunctionCallbackInfo<v8::Value>& args);
 
     // Internal Helpers
     static void pipeline(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void finished(const v8::FunctionCallbackInfo<v8::Value>& args);
+    
+    // Promises API
+    static void pipelinePromise(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void finishedPromise(const v8::FunctionCallbackInfo<v8::Value>& args);
 };
 
 } // namespace module

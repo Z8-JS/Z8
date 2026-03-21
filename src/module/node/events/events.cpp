@@ -1,8 +1,10 @@
 #include "events.h"
+#include "task_queue.h" // Added for Task and TaskQueue
 #include <cstring>
 #include <vector>
 #include <algorithm>
 #include <cstdio>
+#include <iostream> // Added for std::cerr and std::endl
 
 namespace z8 {
 namespace module {
@@ -136,6 +138,67 @@ v8::Local<v8::FunctionTemplate> Events::createEventEmitterTemplate(v8::Isolate* 
 }
 
 // EventEmitter Implementation
+
+// Data structure to hold V8 Global handles for the task
+struct ListenerTaskData {
+    v8::Global<v8::Object> m_emitter;
+    v8::Global<v8::Function> m_listener;
+    std::vector<v8::Global<v8::Value>> m_argv;
+
+    // Constructor to initialize Global handles
+    ListenerTaskData(v8::Isolate* p_isolate, v8::Local<v8::Object> emitter, v8::Local<v8::Function> listener, const std::vector<v8::Local<v8::Value>>& argv)
+        : m_emitter(p_isolate, emitter), m_listener(p_isolate, listener) {
+        for (const auto& arg : argv) {
+            m_argv.emplace_back(p_isolate, arg);
+        }
+    }
+
+    // Destructor to dispose Global handles
+    ~ListenerTaskData() {
+        m_emitter.Reset();
+        m_listener.Reset();
+        for (auto& arg : m_argv) {
+            arg.Reset();
+        }
+    }
+};
+
+// The runner function for the TaskQueue
+static void ListenerTaskRunner(v8::Isolate* p_isolate, v8::Local<v8::Context> context, z8::Task* p_task) {
+    v8::HandleScope handle_scope(p_isolate);
+    v8::Context::Scope context_scope(context);
+
+    ListenerTaskData* p_data = static_cast<ListenerTaskData*>(p_task->p_data);
+
+    v8::Local<v8::Object> emitter = p_data->m_emitter.Get(p_isolate);
+    v8::Local<v8::Function> listener = p_data->m_listener.Get(p_isolate);
+    
+    std::vector<v8::Local<v8::Value>> local_argv;
+    for (const auto& global_arg : p_data->m_argv) {
+        local_argv.push_back(global_arg.Get(p_isolate));
+    }
+
+    v8::TryCatch try_catch(p_isolate);
+    (void)listener->Call(context, emitter, static_cast<int32_t>(local_argv.size()), local_argv.data());
+
+    if (try_catch.HasCaught()) {
+        // Report exception to stderr
+        v8::String::Utf8Value exception(p_isolate, try_catch.Exception());
+        std::cerr << "Uncaught exception in event listener: " << (*exception ? *exception : "unknown") << std::endl;
+    }
+
+    delete p_data; // Clean up the data
+}
+
+// Helper to enqueue a listener call
+static void enqueueListenerCall(v8::Isolate* p_isolate, v8::Local<v8::Context> context, v8::Local<v8::Object> emitter, v8::Local<v8::Function> listener, const std::vector<v8::Local<v8::Value>>& argv) {
+    ListenerTaskData* p_data = new ListenerTaskData(p_isolate, emitter, listener, argv);
+    z8::Task* p_task = new z8::Task();
+    p_task->p_data = p_data;
+    p_task->m_runner = ListenerTaskRunner;
+    p_task->m_is_promise = false; // This is not a promise-based task
+    z8::TaskQueue::getInstance().enqueue(p_task);
+}
 
 void Events::eeConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
@@ -479,20 +542,7 @@ void Events::eeEmit(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     if (handlers->IsFunction()) {
         v8::Local<v8::Function> h = handlers.As<v8::Function>();
-        v8::TryCatch try_catch(p_isolate);
-        v8::MaybeLocal<v8::Value> ret = h->Call(context, self, (int32_t)argv.size(), argv.data());
-        if (try_catch.HasCaught()) { try_catch.ReThrow(); return; }
-
-        if (capture_rejections && !ret.IsEmpty()) {
-            v8::Local<v8::Value> r = ret.ToLocalChecked();
-            if (r->IsPromise()) {
-                v8::Local<v8::Object> data = v8::Object::New(p_isolate);
-                (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter"), self);
-                (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "event"), event_name);
-                v8::Local<v8::Function> handler = v8::Function::New(context, asyncRejectionHandler, data).ToLocalChecked();
-                (void)r.As<v8::Promise>()->Catch(context, handler);
-            }
-        }
+        enqueueListenerCall(p_isolate, context, self, h, argv);
     } else if (handlers->IsArray()) {
         v8::Local<v8::Array> arr = handlers.As<v8::Array>();
         uint32_t len = arr->Length();
@@ -504,20 +554,7 @@ void Events::eeEmit(const v8::FunctionCallbackInfo<v8::Value>& args) {
             v8::Local<v8::Value> h_val = snapshot->Get(context, i).ToLocalChecked();
             if (h_val->IsFunction()) {
                 v8::Local<v8::Function> h = h_val.As<v8::Function>();
-                v8::TryCatch try_catch(p_isolate);
-                v8::MaybeLocal<v8::Value> ret = h->Call(context, self, (int32_t)argv.size(), argv.data());
-                if (try_catch.HasCaught()) { try_catch.ReThrow(); return; }
-
-                if (capture_rejections && !ret.IsEmpty()) {
-                    v8::Local<v8::Value> r = ret.ToLocalChecked();
-                    if (r->IsPromise()) {
-                        v8::Local<v8::Object> data = v8::Object::New(p_isolate);
-                        (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "emitter"), self);
-                        (void)data->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "event"), event_name);
-                        v8::Local<v8::Function> handler = v8::Function::New(context, asyncRejectionHandler, data).ToLocalChecked();
-                        (void)r.As<v8::Promise>()->Catch(context, handler);
-                    }
-                }
+                enqueueListenerCall(p_isolate, context, self, h, argv);
             }
         }
     }

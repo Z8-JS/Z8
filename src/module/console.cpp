@@ -420,12 +420,8 @@ void Console::write(const v8::FunctionCallbackInfo<v8::Value>& args, const char*
         fputs("\x1b[0m\n", p_out);
     else
         fputc('\n', p_out);
-    if (is_error) {
-        fflush(p_out);
-    } else {
-        if (p_out == stderr) g_stderr_io.flushIfNeeded(p_out);
-        else g_stdout_io.flushIfNeeded(p_out);
-    }
+    if (p_out == stderr) g_stderr_io.flushIfNeeded(p_out);
+    else g_stdout_io.flushIfNeeded(p_out);
 }
 
 void Console::adaptiveFlush(FILE* p_out) {
