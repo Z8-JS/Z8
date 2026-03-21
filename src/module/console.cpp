@@ -136,7 +136,8 @@ void Console::assert_(const v8::FunctionCallbackInfo<v8::Value>& args) {
         fputs("\x1b[0m\n", p_out);
     else
         fputc('\n', p_out);
-    fflush(p_out);
+    if (p_out == stderr) g_stderr_io.flushIfNeeded(p_out);
+    else g_stdout_io.flushIfNeeded(p_out);
 }
 
 static std::map<std::string, int32_t> s_console_counts;
@@ -179,7 +180,7 @@ void Console::countReset(const v8::FunctionCallbackInfo<v8::Value>& args) {
     } else {
         std::string msg = "Count for '" + label + "' does not exist\n";
         fwrite(msg.c_str(), 1, msg.length(), stderr);
-        fflush(stderr);
+        g_stderr_io.flushIfNeeded(stderr);
     }
 }
 
@@ -282,7 +283,7 @@ void Console::timeLog(const v8::FunctionCallbackInfo<v8::Value>& args) {
     if (it == s_console_timers.end()) {
         std::string msg = "Timer '" + label + "' does not exist\n";
         fwrite(msg.c_str(), 1, msg.length(), stderr);
-        fflush(stderr);
+        g_stderr_io.flushIfNeeded(stderr);
         return;
     }
 
@@ -313,7 +314,7 @@ void Console::timeEnd(const v8::FunctionCallbackInfo<v8::Value>& args) {
     if (it == s_console_timers.end()) {
         std::string msg = "Timer '" + label + "' does not exist\n";
         fwrite(msg.c_str(), 1, msg.length(), stderr);
-        fflush(stderr);
+        g_stderr_io.flushIfNeeded(stderr);
         return;
     }
 
@@ -374,7 +375,8 @@ void Console::trace(const v8::FunctionCallbackInfo<v8::Value>& args) {
         fwrite(buf, 1, strlen(buf), p_out);
     }
 
-    fflush(p_out);
+    if (p_out == stderr) g_stderr_io.flushIfNeeded(p_out);
+    else g_stdout_io.flushIfNeeded(p_out);
 }
 
 void Console::clear(const v8::FunctionCallbackInfo<v8::Value>& args) {
