@@ -32,6 +32,10 @@ v8::Local<v8::ObjectTemplate> Stream::createTemplate(v8::Isolate* p_isolate) {
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "Transform"), transform_tmpl);
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "pipeline"), v8::FunctionTemplate::New(p_isolate, pipeline));
     tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "finished"), v8::FunctionTemplate::New(p_isolate, finished));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "compose"), v8::FunctionTemplate::New(p_isolate, compose));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "addAbortSignal"), v8::FunctionTemplate::New(p_isolate, addAbortSignal));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "getDefaultHighWaterMark"), v8::FunctionTemplate::New(p_isolate, getDefaultHighWaterMark));
+    tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "setDefaultHighWaterMark"), v8::FunctionTemplate::New(p_isolate, setDefaultHighWaterMark));
 
     v8::Local<v8::ObjectTemplate> promises_tmpl = v8::ObjectTemplate::New(p_isolate);
     promises_tmpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "pipeline"), v8::FunctionTemplate::New(p_isolate, pipelinePromise));
@@ -94,6 +98,25 @@ v8::Local<v8::FunctionTemplate> Stream::createReadableTemplate(v8::Isolate* p_is
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "setEncoding"), v8::FunctionTemplate::New(p_isolate, readableSetEncoding));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "pipe"), v8::FunctionTemplate::New(p_isolate, streamPipe));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "unpipe"), v8::FunctionTemplate::New(p_isolate, streamUnpipe));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "isPaused"), v8::FunctionTemplate::New(p_isolate, readableIsPaused));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "unshift"), v8::FunctionTemplate::New(p_isolate, readableUnshift));
+    proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "wrap"), v8::FunctionTemplate::New(p_isolate, readableWrap));
+    
+    // Property accessors
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "readable"), 
+        v8::FunctionTemplate::New(p_isolate, getReadableProperty));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "readableFlowing"), 
+        v8::FunctionTemplate::New(p_isolate, getReadableFlowing));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "readableHighWaterMark"), 
+        v8::FunctionTemplate::New(p_isolate, getReadableHighWaterMark));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "readableLength"), 
+        v8::FunctionTemplate::New(p_isolate, getReadableLength));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "readableEncoding"), 
+        v8::FunctionTemplate::New(p_isolate, getReadableEncoding));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "readableEnded"), 
+        v8::FunctionTemplate::New(p_isolate, getReadableEnded));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "readableObjectMode"), 
+        v8::FunctionTemplate::New(p_isolate, getReadableObjectMode));
 
     return tmpl;
 }
@@ -214,10 +237,21 @@ void Stream::readablePush(const v8::FunctionCallbackInfo<v8::Value>& args) {
 }
 
 void Stream::readablePause(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     v8::Local<v8::Object> self = args.This();
     v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
     StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
     p_internal->m_paused = true;
+    p_internal->m_flowing = false;
+    
+    // Emit 'pause' event
+    v8::Local<v8::Value> emit_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_val) && emit_val->IsFunction()) {
+        v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "pause") };
+        (void)emit_val.As<v8::Function>()->Call(context, self, 1, argv);
+    }
+    
     args.GetReturnValue().Set(self);
 }
 
@@ -226,6 +260,7 @@ void Stream::readableResume(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
     StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
     p_internal->m_paused = false;
+    p_internal->m_flowing = true;
     
     // In a real implementation, this might trigger reading from the source
     v8::Isolate* p_isolate = args.GetIsolate();
@@ -378,6 +413,24 @@ v8::Local<v8::FunctionTemplate> Stream::createWritableTemplate(v8::Isolate* p_is
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "cork"), v8::FunctionTemplate::New(p_isolate, writableCork));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "uncork"), v8::FunctionTemplate::New(p_isolate, writableUncork));
     proto->Set(v8::String::NewFromUtf8Literal(p_isolate, "setDefaultEncoding"), v8::FunctionTemplate::New(p_isolate, writableSetDefaultEncoding));
+    
+    // Property accessors
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writable"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableProperty));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableHighWaterMark"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableHighWaterMark));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableLength"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableLength));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableObjectMode"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableObjectMode));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableCorked"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableCorked));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableEnded"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableEnded));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableFinished"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableFinished));
+    proto->SetAccessorProperty(v8::String::NewFromUtf8Literal(p_isolate, "writableNeedDrain"), 
+        v8::FunctionTemplate::New(p_isolate, getWritableNeedDrain));
 
     return tmpl;
 }
@@ -440,6 +493,10 @@ void Stream::writableEnd(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     v8::Local<v8::Object> self = args.This();
+    
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    p_internal->m_ended = true;
 
     if (args.Length() > 0 && !args[0]->IsUndefined() && !args[0]->IsFunction()) {
         v8::Local<v8::Value> write_val;
@@ -457,6 +514,9 @@ void Stream::writableEnd(const v8::FunctionCallbackInfo<v8::Value>& args) {
             v8::Isolate* p_isolate = cb_args.GetIsolate();
             v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
             v8::Local<v8::Object> self = cb_args.Data().As<v8::Object>();
+            
+            v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+            StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
             
             // if err? emit error
             if (cb_args.Length() > 0 && !cb_args[0]->IsNull() && !cb_args[0]->IsUndefined()) {
@@ -483,6 +543,8 @@ void Stream::writableEnd(const v8::FunctionCallbackInfo<v8::Value>& args) {
                 (void)push_fn.As<v8::Function>()->Call(context, self, 1, push_argv);
             }
             
+            // Set finished flag and emit 'finish'
+            p_internal->m_finished = true;
             v8::Local<v8::Value> emit_val;
             if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_val) && emit_val->IsFunction()) {
                 v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "finish") };
@@ -493,6 +555,7 @@ void Stream::writableEnd(const v8::FunctionCallbackInfo<v8::Value>& args) {
         v8::Local<v8::Value> flush_argv[] = { flush_cb };
         (void)flush_val.As<v8::Function>()->Call(context, self, 1, flush_argv);
     } else {
+        p_internal->m_finished = true;
         v8::Local<v8::Value> emit_val;
         if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_val) && emit_val->IsFunction()) {
             v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "finish") };
@@ -989,3 +1052,351 @@ void Stream::finishedPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 } // namespace module
 } // namespace z8
+
+// --- Readable Property Getters ---
+
+void Stream::getReadableProperty(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_is_readable && !p_internal->m_destroyed && !p_internal->m_ended);
+}
+
+void Stream::getReadableFlowing(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    
+    if (p_internal->m_flowing) {
+        args.GetReturnValue().Set(true);
+    } else if (p_internal->m_paused) {
+        args.GetReturnValue().Set(false);
+    } else {
+        args.GetReturnValue().Set(v8::Null(p_isolate));
+    }
+}
+
+void Stream::getReadableHighWaterMark(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_high_water_mark);
+}
+
+void Stream::getReadableLength(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(static_cast<uint32_t>(p_internal->m_buffer.size()));
+}
+
+void Stream::getReadableEncoding(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    args.GetReturnValue().Set(v8::Null(p_isolate));
+}
+
+void Stream::getReadableEnded(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_ended);
+}
+
+void Stream::getReadableObjectMode(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    args.GetReturnValue().Set(false);
+}
+
+// --- Writable Property Getters ---
+
+void Stream::getWritableProperty(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_is_writable && !p_internal->m_destroyed && !p_internal->m_ended);
+}
+
+void Stream::getWritableHighWaterMark(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_high_water_mark);
+}
+
+void Stream::getWritableLength(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(static_cast<uint32_t>(p_internal->m_buffer.size()));
+}
+
+void Stream::getWritableObjectMode(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    args.GetReturnValue().Set(false);
+}
+
+void Stream::getWritableCorked(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_cork_count);
+}
+
+void Stream::getWritableEnded(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_ended);
+}
+
+void Stream::getWritableFinished(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_finished);
+}
+
+void Stream::getWritableNeedDrain(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_buffer.size() >= p_internal->m_high_water_mark);
+}
+
+// --- New Readable Methods ---
+
+void Stream::readableIsPaused(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    args.GetReturnValue().Set(p_internal->m_paused);
+}
+
+void Stream::readableUnshift(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.This();
+    
+    if (args.Length() == 0) {
+        return;
+    }
+    
+    v8::Local<v8::Value> chunk = args[0];
+    
+    // If null, signal EOF
+    if (chunk->IsNull()) {
+        v8::Local<v8::Value> emit_val;
+        if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_val) && emit_val->IsFunction()) {
+            v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "end") };
+            (void)emit_val.As<v8::Function>()->Call(context, self, 1, argv);
+        }
+        return;
+    }
+    
+    // Store the chunk internally (simplified - in real implementation would prepend to buffer)
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    
+    // Emit 'readable' event to signal data is available
+    v8::Local<v8::Value> emit_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_val) && emit_val->IsFunction()) {
+        v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "readable") };
+        (void)emit_val.As<v8::Function>()->Call(context, self, 1, argv);
+    }
+}
+
+void Stream::readableWrap(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.This();
+    
+    if (args.Length() < 1 || !args[0]->IsObject()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Stream argument required")));
+        return;
+    }
+    
+    v8::Local<v8::Object> old_stream = args[0].As<v8::Object>();
+    
+    // Listen to 'data' events from old stream and push to new stream
+    v8::Local<v8::Value> on_val;
+    if (old_stream->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "on")).ToLocal(&on_val) && on_val->IsFunction()) {
+        v8::Local<v8::Function> data_handler = v8::Function::New(context, [](const v8::FunctionCallbackInfo<v8::Value>& cb_args) {
+            v8::Isolate* p_isolate = cb_args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::Object> self = cb_args.Data().As<v8::Object>();
+            
+            v8::Local<v8::Value> push_fn;
+            if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "push")).ToLocal(&push_fn) && push_fn->IsFunction()) {
+                v8::Local<v8::Value> argv[] = { cb_args[0] };
+                (void)push_fn.As<v8::Function>()->Call(context, self, 1, argv);
+            }
+        }, self).ToLocalChecked();
+        
+        v8::Local<v8::Value> on_argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "data"), data_handler };
+        (void)on_val.As<v8::Function>()->Call(context, old_stream, 2, on_argv);
+        
+        // Listen to 'end' event
+        v8::Local<v8::Function> end_handler = v8::Function::New(context, [](const v8::FunctionCallbackInfo<v8::Value>& cb_args) {
+            v8::Isolate* p_isolate = cb_args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::Object> self = cb_args.Data().As<v8::Object>();
+            
+            v8::Local<v8::Value> push_fn;
+            if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "push")).ToLocal(&push_fn) && push_fn->IsFunction()) {
+                v8::Local<v8::Value> argv[] = { v8::Null(p_isolate) };
+                (void)push_fn.As<v8::Function>()->Call(context, self, 1, argv);
+            }
+        }, self).ToLocalChecked();
+        
+        v8::Local<v8::Value> end_argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "end"), end_handler };
+        (void)on_val.As<v8::Function>()->Call(context, old_stream, 2, end_argv);
+    }
+    
+    args.GetReturnValue().Set(self);
+}
+
+// --- Cork/Uncork Implementation ---
+
+void Stream::writableCork(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    p_internal->m_cork_count++;
+    p_internal->m_corked = true;
+    args.GetReturnValue().Set(self);
+}
+
+void Stream::writableUncork(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.This();
+    v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+    StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+    
+    if (p_internal->m_cork_count > 0) {
+        p_internal->m_cork_count--;
+    }
+    
+    if (p_internal->m_cork_count == 0) {
+        p_internal->m_corked = false;
+        
+        // Emit 'drain' if buffer was full
+        if (p_internal->m_buffer.size() >= p_internal->m_high_water_mark) {
+            v8::Local<v8::Value> emit_val;
+            if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_val) && emit_val->IsFunction()) {
+                v8::Local<v8::Value> argv[] = { v8::String::NewFromUtf8Literal(p_isolate, "drain") };
+                (void)emit_val.As<v8::Function>()->Call(context, self, 1, argv);
+            }
+        }
+    }
+    
+    args.GetReturnValue().Set(self);
+}
+
+// --- Stream Utility Functions ---
+
+void Stream::compose(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    if (args.Length() < 2) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "At least 2 streams required for compose")));
+        return;
+    }
+    
+    // Create a Duplex stream that connects all streams
+    v8::Local<v8::FunctionTemplate> duplex_tmpl = getDuplexTemplate(p_isolate);
+    v8::Local<v8::Function> duplex_ctor;
+    if (!duplex_tmpl->GetFunction(context).ToLocal(&duplex_ctor)) {
+        return;
+    }
+    
+    v8::Local<v8::Object> duplex_instance;
+    if (!duplex_ctor->NewInstance(context, 0, nullptr).ToLocal(&duplex_instance)) {
+        return;
+    }
+    
+    // Connect all streams using pipeline
+    for (int32_t i = 0; i < args.Length() - 1; ++i) {
+        v8::Local<v8::Value> source = args[i];
+        v8::Local<v8::Value> dest = args[i + 1];
+        
+        if (source->IsObject() && dest->IsObject()) {
+            v8::Local<v8::Object> source_obj = source.As<v8::Object>();
+            v8::Local<v8::Value> pipe_fn;
+            if (source_obj->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "pipe")).ToLocal(&pipe_fn) && pipe_fn->IsFunction()) {
+                v8::Local<v8::Value> pipe_argv[] = { dest };
+                (void)pipe_fn.As<v8::Function>()->Call(context, source_obj, 1, pipe_argv);
+            }
+        }
+    }
+    
+    args.GetReturnValue().Set(duplex_instance);
+}
+
+void Stream::addAbortSignal(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    if (args.Length() < 2 || !args[0]->IsObject() || !args[1]->IsObject()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Signal and stream arguments required")));
+        return;
+    }
+    
+    v8::Local<v8::Object> signal = args[0].As<v8::Object>();
+    v8::Local<v8::Object> stream_obj = args[1].As<v8::Object>();
+    
+    // Listen for 'abort' event on signal
+    v8::Local<v8::Value> add_listener_fn;
+    if (signal->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "addEventListener")).ToLocal(&add_listener_fn) && add_listener_fn->IsFunction()) {
+        v8::Local<v8::Function> abort_handler = v8::Function::New(context, [](const v8::FunctionCallbackInfo<v8::Value>& cb_args) {
+            v8::Isolate* p_isolate = cb_args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::Object> stream_obj = cb_args.Data().As<v8::Object>();
+            
+            v8::Local<v8::Value> destroy_fn;
+            if (stream_obj->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "destroy")).ToLocal(&destroy_fn) && destroy_fn->IsFunction()) {
+                v8::Local<v8::Value> error = v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "AbortError"));
+                v8::Local<v8::Value> argv[] = { error };
+                (void)destroy_fn.As<v8::Function>()->Call(context, stream_obj, 1, argv);
+            }
+        }, stream_obj).ToLocalChecked();
+        
+        v8::Local<v8::Value> listener_argv[] = { 
+            v8::String::NewFromUtf8Literal(p_isolate, "abort"), 
+            abort_handler 
+        };
+        (void)add_listener_fn.As<v8::Function>()->Call(context, signal, 2, listener_argv);
+    }
+    
+    args.GetReturnValue().Set(stream_obj);
+}
+
+static uint32_t s_default_high_water_mark = 16 * 1024; // 16KB
+static uint32_t s_default_object_mode_high_water_mark = 16;
+
+void Stream::getDefaultHighWaterMark(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    bool object_mode = args.Length() > 0 && args[0]->BooleanValue(args.GetIsolate());
+    args.GetReturnValue().Set(object_mode ? s_default_object_mode_high_water_mark : s_default_high_water_mark);
+}
+
+void Stream::setDefaultHighWaterMark(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    
+    if (args.Length() < 2 || !args[1]->IsNumber()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "objectMode and value arguments required")));
+        return;
+    }
+    
+    bool object_mode = args[0]->BooleanValue(p_isolate);
+    uint32_t value = args[1]->Uint32Value(p_isolate->GetCurrentContext()).FromMaybe(0);
+    
+    if (object_mode) {
+        s_default_object_mode_high_water_mark = value;
+    } else {
+        s_default_high_water_mark = value;
+    }
+}
