@@ -85,13 +85,13 @@ The following methods allow treating a Readable stream as an iterable collection
 
 Creates a new stream with the results of calling a provided function on every chunk.
 
-**Status**: Partially implemented (returns Transform stream, needs _transform logic)
+**Status**: Implemented
 
 #### `readable.filter(fn[, options])`
 
 Creates a new stream with all chunks that pass the test implemented by the provided function.
 
-**Status**: Partially implemented (returns Transform stream, needs _transform logic)
+**Status**: Implemented
 
 #### `readable.forEach(fn[, options])`
 
@@ -125,21 +125,28 @@ Tests whether all chunks in the stream pass the test implemented by the provided
 
 #### `readable.flatMap(fn[, options])`
 
-Creates a new stream by applying a function to each chunk and flattening the result.
+Creates a new stream by applying a function to each chunk and flattening the result. If the function returns an array or iterable, each element is emitted separately.
 
-**Status**: Partially implemented (returns Transform stream, needs _transform logic)
+**Status**: Implemented
+
+**Example:**
+```js
+const readable = stream.Readable.from([1, 2, 3]);
+const flatMapped = readable.flatMap(x => [x, x * 2]);
+// Emits: 1, 2, 2, 4, 3, 6
+```
 
 #### `readable.drop(limit[, options])`
 
 Drops the first `limit` chunks from the stream.
 
-**Status**: Partially implemented (returns Transform stream, needs _transform logic)
+**Status**: Implemented
 
 #### `readable.take(limit[, options])`
 
 Takes the first `limit` chunks from the stream.
 
-**Status**: Partially implemented (returns Transform stream, needs _transform logic)
+**Status**: Implemented
 
 #### `readable.reduce(fn[, initial[, options]])`
 
