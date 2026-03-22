@@ -141,4 +141,5 @@ try {
 // Wait for async operations
 setTimeout(() => {
     console.log('\n=== Collection Methods Tests Complete ===');
+    process.exit(0);
 }, 500);

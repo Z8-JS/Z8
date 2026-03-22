@@ -1465,7 +1465,50 @@ v8::Local<v8::FunctionTemplate> Stream::createPassThroughTemplate(v8::Isolate* p
 }
 
 void Stream::passThroughConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    // Create a transform with a passthrough function
+    v8::Local<v8::Object> options = v8::Object::New(p_isolate);
+    
+    // Create a simple passthrough transform function
+    auto transform_fn = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        v8::Isolate* p_isolate = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+        
+        // args[0] = chunk, args[1] = encoding, args[2] = callback
+        if (args.Length() >= 1) {
+            // Push the chunk as-is
+            v8::Local<v8::Value> push_val;
+            if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "push")).ToLocal(&push_val) && push_val->IsFunction()) {
+                v8::Local<v8::Function> push_fn = push_val.As<v8::Function>();
+                v8::Local<v8::Value> push_argv[] = { args[0] };
+                (void)push_fn->Call(context, self, 1, push_argv);
+            }
+        }
+        
+        // Call the callback if provided
+        if (args.Length() >= 3 && args[2]->IsFunction()) {
+            v8::Local<v8::Function> callback = args[2].As<v8::Function>();
+            (void)callback->Call(context, self, 0, nullptr);
+        }
+    };
+    
+    v8::Local<v8::Function> transform_func = v8::Function::New(context, transform_fn).ToLocalChecked();
+    (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "transform"), transform_func);
+    
+    // Call transform constructor with options
+    v8::Local<v8::Value> argv[] = { options };
+    v8::Local<v8::Value> old_args = args.Data();
+    v8::PropertyAttribute attr = v8::PropertyAttribute::None;
+    
+    // Temporarily replace args
     transformConstructor(args);
+    
+    // Set the _transform function on the instance
+    v8::Local<v8::Object> self = args.This();
+    (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_transform"), transform_func);
 }
 
 // --- Duplex.from ---

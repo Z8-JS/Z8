@@ -366,6 +366,8 @@ PassThrough is a trivial implementation of a Transform stream that simply passes
 new stream.PassThrough([options]);
 ```
 
+**Status**: Partially implemented (constructor works, data flow needs _transform trigger logic)
+
 ### Example
 
 ```js
