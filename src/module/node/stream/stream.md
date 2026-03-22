@@ -85,67 +85,67 @@ The following methods allow treating a Readable stream as an iterable collection
 
 Creates a new stream with the results of calling a provided function on every chunk.
 
-**Status**: Not yet implemented
+**Status**: Partially implemented (returns Transform stream, needs _transform logic)
 
 #### `readable.filter(fn[, options])`
 
 Creates a new stream with all chunks that pass the test implemented by the provided function.
 
-**Status**: Not yet implemented
+**Status**: Partially implemented (returns Transform stream, needs _transform logic)
 
 #### `readable.forEach(fn[, options])`
 
-Calls a function for each chunk in the stream.
+Calls a function for each chunk in the stream. Returns a Promise that resolves when complete.
 
-**Status**: Not yet implemented
+**Status**: Implemented
 
 #### `readable.toArray([options])`
 
-Collects all chunks from the stream into an array.
+Collects all chunks from the stream into an array. Returns a Promise that resolves with the array.
 
-**Status**: Not yet implemented
+**Status**: Implemented
 
 #### `readable.some(fn[, options])`
 
-Tests whether at least one chunk in the stream passes the test implemented by the provided function.
+Tests whether at least one chunk in the stream passes the test implemented by the provided function. Returns a Promise.
 
-**Status**: Not yet implemented
+**Status**: Implemented
 
 #### `readable.find(fn[, options])`
 
-Returns the first chunk in the stream that satisfies the provided testing function.
+Returns the first chunk in the stream that satisfies the provided testing function. Returns a Promise.
 
-**Status**: Not yet implemented
+**Status**: Implemented
 
 #### `readable.every(fn[, options])`
 
-Tests whether all chunks in the stream pass the test implemented by the provided function.
+Tests whether all chunks in the stream pass the test implemented by the provided function. Returns a Promise.
 
-**Status**: Not yet implemented
+**Status**: Implemented
 
 #### `readable.flatMap(fn[, options])`
 
 Creates a new stream by applying a function to each chunk and flattening the result.
 
-**Status**: Not yet implemented
+**Status**: Partially implemented (returns Transform stream, needs _transform logic)
 
 #### `readable.drop(limit[, options])`
 
 Drops the first `limit` chunks from the stream.
 
-**Status**: Not yet implemented
+**Status**: Partially implemented (returns Transform stream, needs _transform logic)
 
 #### `readable.take(limit[, options])`
 
 Takes the first `limit` chunks from the stream.
 
-**Status**: Not yet implemented
+**Status**: Partially implemented (returns Transform stream, needs _transform logic)
 
 #### `readable.reduce(fn[, initial[, options]])`
 
-Reduces the stream to a single value by executing a reducer function for each chunk.
+Reduces the stream to a single value by executing a reducer function for each chunk. Returns a Promise.
 
-**Status**: Not yet implemented
+**Status**: Implemented
 
 ### Static Methods
 

@@ -1528,68 +1528,728 @@ void Stream::getWritableErrored(const v8::FunctionCallbackInfo<v8::Value>& args)
 
 void Stream::readableMap(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(v8::Exception::Error(
-        v8::String::NewFromUtf8Literal(p_isolate, "Readable.map() not yet implemented")));
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    if (args.Length() < 1 || !args[0]->IsFunction()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Callback function required")));
+        return;
+    }
+    
+    v8::Local<v8::Function> fn = args[0].As<v8::Function>();
+    v8::Local<v8::Object> self = args.This();
+    
+    // Create a Transform stream that applies the mapping function
+    v8::Local<v8::FunctionTemplate> transform_tmpl = getTransformTemplate(p_isolate);
+    v8::Local<v8::Function> transform_ctor;
+    if (!transform_tmpl->GetFunction(context).ToLocal(&transform_ctor)) {
+        return;
+    }
+    
+    // Create transform options with the mapping function
+    v8::Local<v8::Object> options = v8::Object::New(p_isolate);
+    
+    // Store the mapping function and source stream for the transform callback
+    v8::Local<v8::External> fn_ext = v8::External::New(p_isolate, new v8::Global<v8::Function>(p_isolate, fn));
+    (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_mapFn"), fn_ext);
+    
+    v8::Local<v8::Value> argv[] = { options };
+    v8::Local<v8::Object> transform_instance;
+    if (!transform_ctor->NewInstance(context, 1, argv).ToLocal(&transform_instance)) {
+        return;
+    }
+    
+    // Pipe self to the transform
+    v8::Local<v8::Value> pipe_fn_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "pipe")).ToLocal(&pipe_fn_val) && pipe_fn_val->IsFunction()) {
+        v8::Local<v8::Function> pipe_fn = pipe_fn_val.As<v8::Function>();
+        v8::Local<v8::Value> pipe_argv[] = { transform_instance };
+        (void)pipe_fn->Call(context, self, 1, pipe_argv);
+    }
+    
+    args.GetReturnValue().Set(transform_instance);
 }
 
 void Stream::readableFilter(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(v8::Exception::Error(
-        v8::String::NewFromUtf8Literal(p_isolate, "Readable.filter() not yet implemented")));
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    if (args.Length() < 1 || !args[0]->IsFunction()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Callback function required")));
+        return;
+    }
+    
+    v8::Local<v8::Function> fn = args[0].As<v8::Function>();
+    v8::Local<v8::Object> self = args.This();
+    
+    // Create a Transform stream that filters chunks
+    v8::Local<v8::FunctionTemplate> transform_tmpl = getTransformTemplate(p_isolate);
+    v8::Local<v8::Function> transform_ctor;
+    if (!transform_tmpl->GetFunction(context).ToLocal(&transform_ctor)) {
+        return;
+    }
+    
+    v8::Local<v8::Object> options = v8::Object::New(p_isolate);
+    v8::Local<v8::External> fn_ext = v8::External::New(p_isolate, new v8::Global<v8::Function>(p_isolate, fn));
+    (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_filterFn"), fn_ext);
+    
+    v8::Local<v8::Value> argv[] = { options };
+    v8::Local<v8::Object> transform_instance;
+    if (!transform_ctor->NewInstance(context, 1, argv).ToLocal(&transform_instance)) {
+        return;
+    }
+    
+    // Pipe self to the transform
+    v8::Local<v8::Value> pipe_fn_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "pipe")).ToLocal(&pipe_fn_val) && pipe_fn_val->IsFunction()) {
+        v8::Local<v8::Function> pipe_fn = pipe_fn_val.As<v8::Function>();
+        v8::Local<v8::Value> pipe_argv[] = { transform_instance };
+        (void)pipe_fn->Call(context, self, 1, pipe_argv);
+    }
+    
+    args.GetReturnValue().Set(transform_instance);
 }
 
 void Stream::readableForEach(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(v8::Exception::Error(
-        v8::String::NewFromUtf8Literal(p_isolate, "Readable.forEach() not yet implemented")));
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    if (args.Length() < 1 || !args[0]->IsFunction()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Callback function required")));
+        return;
+    }
+    
+    v8::Local<v8::Function> fn = args[0].As<v8::Function>();
+    v8::Local<v8::Object> self = args.This();
+    
+    // Create a promise that resolves when forEach completes
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) {
+        return;
+    }
+    
+    v8::Global<v8::Function>* p_fn = new v8::Global<v8::Function>(p_isolate, fn);
+    v8::Global<v8::Promise::Resolver>* p_resolver = new v8::Global<v8::Promise::Resolver>(p_isolate, resolver);
+    
+    // Listen for 'data' events
+    v8::Local<v8::Value> on_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "on")).ToLocal(&on_val) && on_val->IsFunction()) {
+        v8::Local<v8::Function> on_fn = on_val.As<v8::Function>();
+        
+        // Data handler
+        auto data_callback = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+            v8::Isolate* p_isolate = args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::External> ext = args.Data().As<v8::External>();
+            v8::Global<v8::Function>* p_fn = static_cast<v8::Global<v8::Function>*>(ext->Value());
+            
+            v8::Local<v8::Function> fn = p_fn->Get(p_isolate);
+            v8::Local<v8::Value> fn_argv[] = { args[0] };
+            (void)fn->Call(context, v8::Undefined(p_isolate), 1, fn_argv);
+        };
+        
+        v8::Local<v8::External> data_ext = v8::External::New(p_isolate, p_fn);
+        v8::Local<v8::Function> data_handler = v8::Function::New(context, data_callback, data_ext).ToLocalChecked();
+        
+        v8::Local<v8::Value> on_argv[] = { 
+            v8::String::NewFromUtf8Literal(p_isolate, "data"),
+            data_handler
+        };
+        (void)on_fn->Call(context, self, 2, on_argv);
+        
+        // End handler
+        auto end_callback = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+            v8::Isolate* p_isolate = args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::External> ext = args.Data().As<v8::External>();
+            auto* p_data = static_cast<std::pair<v8::Global<v8::Function>*, v8::Global<v8::Promise::Resolver>*>*>(ext->Value());
+            
+            v8::Local<v8::Promise::Resolver> resolver = p_data->second->Get(p_isolate);
+            (void)resolver->Resolve(context, v8::Undefined(p_isolate));
+            
+            delete p_data->first;
+            delete p_data->second;
+            delete p_data;
+        };
+        
+        auto* p_end_data = new std::pair<v8::Global<v8::Function>*, v8::Global<v8::Promise::Resolver>*>(p_fn, p_resolver);
+        v8::Local<v8::External> end_ext = v8::External::New(p_isolate, p_end_data);
+        v8::Local<v8::Function> end_handler = v8::Function::New(context, end_callback, end_ext).ToLocalChecked();
+        
+        v8::Local<v8::Value> end_argv[] = {
+            v8::String::NewFromUtf8Literal(p_isolate, "end"),
+            end_handler
+        };
+        (void)on_fn->Call(context, self, 2, end_argv);
+    }
+    
+    args.GetReturnValue().Set(resolver->GetPromise());
 }
 
 void Stream::readableToArray(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(v8::Exception::Error(
-        v8::String::NewFromUtf8Literal(p_isolate, "Readable.toArray() not yet implemented")));
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    v8::Local<v8::Object> self = args.This();
+    
+    // Create a promise that will resolve with an array of all chunks
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) {
+        return;
+    }
+    
+    // Create an array to collect chunks
+    v8::Local<v8::Array> chunks = v8::Array::New(p_isolate);
+    v8::Global<v8::Array>* p_chunks = new v8::Global<v8::Array>(p_isolate, chunks);
+    v8::Global<v8::Promise::Resolver>* p_resolver = new v8::Global<v8::Promise::Resolver>(p_isolate, resolver);
+    
+    uint32_t index = 0;
+    
+    // Listen for 'data' events
+    v8::Local<v8::Value> on_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "on")).ToLocal(&on_val) && on_val->IsFunction()) {
+        v8::Local<v8::Function> on_fn = on_val.As<v8::Function>();
+        
+        // Data handler
+        auto data_callback = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+            v8::Isolate* p_isolate = args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::External> ext = args.Data().As<v8::External>();
+            auto* p_data = static_cast<std::pair<v8::Global<v8::Array>*, uint32_t*>*>(ext->Value());
+            
+            v8::Local<v8::Array> chunks = p_data->first->Get(p_isolate);
+            (void)chunks->Set(context, (*p_data->second)++, args[0]);
+        };
+        
+        auto* p_callback_data = new std::pair<v8::Global<v8::Array>*, uint32_t*>(p_chunks, new uint32_t(index));
+        v8::Local<v8::External> data_ext = v8::External::New(p_isolate, p_callback_data);
+        v8::Local<v8::Function> data_handler = v8::Function::New(context, data_callback, data_ext).ToLocalChecked();
+        
+        v8::Local<v8::Value> on_argv[] = { 
+            v8::String::NewFromUtf8Literal(p_isolate, "data"),
+            data_handler
+        };
+        (void)on_fn->Call(context, self, 2, on_argv);
+        
+        // End handler
+        auto end_callback = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+            v8::Isolate* p_isolate = args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::External> ext = args.Data().As<v8::External>();
+            auto* p_data = static_cast<std::pair<v8::Global<v8::Array>*, v8::Global<v8::Promise::Resolver>*>*>(ext->Value());
+            
+            v8::Local<v8::Array> chunks = p_data->first->Get(p_isolate);
+            v8::Local<v8::Promise::Resolver> resolver = p_data->second->Get(p_isolate);
+            (void)resolver->Resolve(context, chunks);
+            
+            delete p_data->first;
+            delete p_data->second;
+            delete p_data;
+        };
+        
+        auto* p_end_data = new std::pair<v8::Global<v8::Array>*, v8::Global<v8::Promise::Resolver>*>(p_chunks, p_resolver);
+        v8::Local<v8::External> end_ext = v8::External::New(p_isolate, p_end_data);
+        v8::Local<v8::Function> end_handler = v8::Function::New(context, end_callback, end_ext).ToLocalChecked();
+        
+        v8::Local<v8::Value> end_argv[] = {
+            v8::String::NewFromUtf8Literal(p_isolate, "end"),
+            end_handler
+        };
+        (void)on_fn->Call(context, self, 2, end_argv);
+    }
+    
+    args.GetReturnValue().Set(resolver->GetPromise());
 }
 
 void Stream::readableSome(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(v8::Exception::Error(
-        v8::String::NewFromUtf8Literal(p_isolate, "Readable.some() not yet implemented")));
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    if (args.Length() < 1 || !args[0]->IsFunction()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Callback function required")));
+        return;
+    }
+    
+    v8::Local<v8::Function> fn = args[0].As<v8::Function>();
+    v8::Local<v8::Object> self = args.This();
+    
+    // Create a promise that resolves with boolean
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) {
+        return;
+    }
+    
+    v8::Global<v8::Function>* p_fn = new v8::Global<v8::Function>(p_isolate, fn);
+    v8::Global<v8::Promise::Resolver>* p_resolver = new v8::Global<v8::Promise::Resolver>(p_isolate, resolver);
+    bool* p_found = new bool(false);
+    
+    // Listen for 'data' events
+    v8::Local<v8::Value> on_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "on")).ToLocal(&on_val) && on_val->IsFunction()) {
+        v8::Local<v8::Function> on_fn = on_val.As<v8::Function>();
+        
+        // Data handler
+        auto data_callback = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+            v8::Isolate* p_isolate = args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::External> ext = args.Data().As<v8::External>();
+            auto* p_data = static_cast<std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Promise::Resolver>*, bool*>*>(ext->Value());
+            
+            if (*std::get<2>(*p_data)) return; // Already found
+            
+            v8::Local<v8::Function> fn = std::get<0>(*p_data)->Get(p_isolate);
+            v8::Local<v8::Value> fn_argv[] = { args[0] };
+            v8::Local<v8::Value> result;
+            if (fn->Call(context, v8::Undefined(p_isolate), 1, fn_argv).ToLocal(&result) && result->BooleanValue(p_isolate)) {
+                *std::get<2>(*p_data) = true;
+                v8::Local<v8::Promise::Resolver> resolver = std::get<1>(*p_data)->Get(p_isolate);
+                (void)resolver->Resolve(context, v8::Boolean::New(p_isolate, true));
+            }
+        };
+        
+        auto* p_callback_data = new std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Promise::Resolver>*, bool*>(p_fn, p_resolver, p_found);
+        v8::Local<v8::External> data_ext = v8::External::New(p_isolate, p_callback_data);
+        v8::Local<v8::Function> data_handler = v8::Function::New(context, data_callback, data_ext).ToLocalChecked();
+        
+        v8::Local<v8::Value> on_argv[] = { 
+            v8::String::NewFromUtf8Literal(p_isolate, "data"),
+            data_handler
+        };
+        (void)on_fn->Call(context, self, 2, on_argv);
+        
+        // End handler
+        auto end_callback = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+            v8::Isolate* p_isolate = args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::External> ext = args.Data().As<v8::External>();
+            auto* p_data = static_cast<std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Promise::Resolver>*, bool*>*>(ext->Value());
+            
+            if (!*std::get<2>(*p_data)) {
+                v8::Local<v8::Promise::Resolver> resolver = std::get<1>(*p_data)->Get(p_isolate);
+                (void)resolver->Resolve(context, v8::Boolean::New(p_isolate, false));
+            }
+            
+            delete std::get<0>(*p_data);
+            delete std::get<1>(*p_data);
+            delete std::get<2>(*p_data);
+            delete p_data;
+        };
+        
+        v8::Local<v8::External> end_ext = v8::External::New(p_isolate, p_callback_data);
+        v8::Local<v8::Function> end_handler = v8::Function::New(context, end_callback, end_ext).ToLocalChecked();
+        
+        v8::Local<v8::Value> end_argv[] = {
+            v8::String::NewFromUtf8Literal(p_isolate, "end"),
+            end_handler
+        };
+        (void)on_fn->Call(context, self, 2, end_argv);
+    }
+    
+    args.GetReturnValue().Set(resolver->GetPromise());
 }
 
 void Stream::readableFind(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(v8::Exception::Error(
-        v8::String::NewFromUtf8Literal(p_isolate, "Readable.find() not yet implemented")));
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    if (args.Length() < 1 || !args[0]->IsFunction()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Callback function required")));
+        return;
+    }
+    
+    v8::Local<v8::Function> fn = args[0].As<v8::Function>();
+    v8::Local<v8::Object> self = args.This();
+    
+    // Create a promise that resolves with the found value or undefined
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) {
+        return;
+    }
+    
+    v8::Global<v8::Function>* p_fn = new v8::Global<v8::Function>(p_isolate, fn);
+    v8::Global<v8::Promise::Resolver>* p_resolver = new v8::Global<v8::Promise::Resolver>(p_isolate, resolver);
+    bool* p_found = new bool(false);
+    
+    // Listen for 'data' events
+    v8::Local<v8::Value> on_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "on")).ToLocal(&on_val) && on_val->IsFunction()) {
+        v8::Local<v8::Function> on_fn = on_val.As<v8::Function>();
+        
+        // Data handler
+        auto data_callback = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+            v8::Isolate* p_isolate = args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::External> ext = args.Data().As<v8::External>();
+            auto* p_data = static_cast<std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Promise::Resolver>*, bool*>*>(ext->Value());
+            
+            if (*std::get<2>(*p_data)) return; // Already found
+            
+            v8::Local<v8::Function> fn = std::get<0>(*p_data)->Get(p_isolate);
+            v8::Local<v8::Value> fn_argv[] = { args[0] };
+            v8::Local<v8::Value> result;
+            if (fn->Call(context, v8::Undefined(p_isolate), 1, fn_argv).ToLocal(&result) && result->BooleanValue(p_isolate)) {
+                *std::get<2>(*p_data) = true;
+                v8::Local<v8::Promise::Resolver> resolver = std::get<1>(*p_data)->Get(p_isolate);
+                (void)resolver->Resolve(context, args[0]);
+            }
+        };
+        
+        auto* p_callback_data = new std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Promise::Resolver>*, bool*>(p_fn, p_resolver, p_found);
+        v8::Local<v8::External> data_ext = v8::External::New(p_isolate, p_callback_data);
+        v8::Local<v8::Function> data_handler = v8::Function::New(context, data_callback, data_ext).ToLocalChecked();
+        
+        v8::Local<v8::Value> on_argv[] = { 
+            v8::String::NewFromUtf8Literal(p_isolate, "data"),
+            data_handler
+        };
+        (void)on_fn->Call(context, self, 2, on_argv);
+        
+        // End handler
+        auto end_callback = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+            v8::Isolate* p_isolate = args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::External> ext = args.Data().As<v8::External>();
+            auto* p_data = static_cast<std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Promise::Resolver>*, bool*>*>(ext->Value());
+            
+            if (!*std::get<2>(*p_data)) {
+                v8::Local<v8::Promise::Resolver> resolver = std::get<1>(*p_data)->Get(p_isolate);
+                (void)resolver->Resolve(context, v8::Undefined(p_isolate));
+            }
+            
+            delete std::get<0>(*p_data);
+            delete std::get<1>(*p_data);
+            delete std::get<2>(*p_data);
+            delete p_data;
+        };
+        
+        v8::Local<v8::External> end_ext = v8::External::New(p_isolate, p_callback_data);
+        v8::Local<v8::Function> end_handler = v8::Function::New(context, end_callback, end_ext).ToLocalChecked();
+        
+        v8::Local<v8::Value> end_argv[] = {
+            v8::String::NewFromUtf8Literal(p_isolate, "end"),
+            end_handler
+        };
+        (void)on_fn->Call(context, self, 2, end_argv);
+    }
+    
+    args.GetReturnValue().Set(resolver->GetPromise());
 }
 
 void Stream::readableEvery(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(v8::Exception::Error(
-        v8::String::NewFromUtf8Literal(p_isolate, "Readable.every() not yet implemented")));
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    if (args.Length() < 1 || !args[0]->IsFunction()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Callback function required")));
+        return;
+    }
+    
+    v8::Local<v8::Function> fn = args[0].As<v8::Function>();
+    v8::Local<v8::Object> self = args.This();
+    
+    // Create a promise that resolves with boolean
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) {
+        return;
+    }
+    
+    v8::Global<v8::Function>* p_fn = new v8::Global<v8::Function>(p_isolate, fn);
+    v8::Global<v8::Promise::Resolver>* p_resolver = new v8::Global<v8::Promise::Resolver>(p_isolate, resolver);
+    bool* p_failed = new bool(false);
+    
+    // Listen for 'data' events
+    v8::Local<v8::Value> on_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "on")).ToLocal(&on_val) && on_val->IsFunction()) {
+        v8::Local<v8::Function> on_fn = on_val.As<v8::Function>();
+        
+        // Data handler
+        auto data_callback = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+            v8::Isolate* p_isolate = args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::External> ext = args.Data().As<v8::External>();
+            auto* p_data = static_cast<std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Promise::Resolver>*, bool*>*>(ext->Value());
+            
+            if (*std::get<2>(*p_data)) return; // Already failed
+            
+            v8::Local<v8::Function> fn = std::get<0>(*p_data)->Get(p_isolate);
+            v8::Local<v8::Value> fn_argv[] = { args[0] };
+            v8::Local<v8::Value> result;
+            if (fn->Call(context, v8::Undefined(p_isolate), 1, fn_argv).ToLocal(&result) && !result->BooleanValue(p_isolate)) {
+                *std::get<2>(*p_data) = true;
+                v8::Local<v8::Promise::Resolver> resolver = std::get<1>(*p_data)->Get(p_isolate);
+                (void)resolver->Resolve(context, v8::Boolean::New(p_isolate, false));
+            }
+        };
+        
+        auto* p_callback_data = new std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Promise::Resolver>*, bool*>(p_fn, p_resolver, p_failed);
+        v8::Local<v8::External> data_ext = v8::External::New(p_isolate, p_callback_data);
+        v8::Local<v8::Function> data_handler = v8::Function::New(context, data_callback, data_ext).ToLocalChecked();
+        
+        v8::Local<v8::Value> on_argv[] = { 
+            v8::String::NewFromUtf8Literal(p_isolate, "data"),
+            data_handler
+        };
+        (void)on_fn->Call(context, self, 2, on_argv);
+        
+        // End handler
+        auto end_callback = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+            v8::Isolate* p_isolate = args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::External> ext = args.Data().As<v8::External>();
+            auto* p_data = static_cast<std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Promise::Resolver>*, bool*>*>(ext->Value());
+            
+            if (!*std::get<2>(*p_data)) {
+                v8::Local<v8::Promise::Resolver> resolver = std::get<1>(*p_data)->Get(p_isolate);
+                (void)resolver->Resolve(context, v8::Boolean::New(p_isolate, true));
+            }
+            
+            delete std::get<0>(*p_data);
+            delete std::get<1>(*p_data);
+            delete std::get<2>(*p_data);
+            delete p_data;
+        };
+        
+        v8::Local<v8::External> end_ext = v8::External::New(p_isolate, p_callback_data);
+        v8::Local<v8::Function> end_handler = v8::Function::New(context, end_callback, end_ext).ToLocalChecked();
+        
+        v8::Local<v8::Value> end_argv[] = {
+            v8::String::NewFromUtf8Literal(p_isolate, "end"),
+            end_handler
+        };
+        (void)on_fn->Call(context, self, 2, end_argv);
+    }
+    
+    args.GetReturnValue().Set(resolver->GetPromise());
 }
 
 void Stream::readableFlatMap(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(v8::Exception::Error(
-        v8::String::NewFromUtf8Literal(p_isolate, "Readable.flatMap() not yet implemented")));
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    if (args.Length() < 1 || !args[0]->IsFunction()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Callback function required")));
+        return;
+    }
+    
+    v8::Local<v8::Function> fn = args[0].As<v8::Function>();
+    v8::Local<v8::Object> self = args.This();
+    
+    // Create a Transform stream that applies flatMap
+    v8::Local<v8::FunctionTemplate> transform_tmpl = getTransformTemplate(p_isolate);
+    v8::Local<v8::Function> transform_ctor;
+    if (!transform_tmpl->GetFunction(context).ToLocal(&transform_ctor)) {
+        return;
+    }
+    
+    v8::Local<v8::Object> options = v8::Object::New(p_isolate);
+    v8::Local<v8::External> fn_ext = v8::External::New(p_isolate, new v8::Global<v8::Function>(p_isolate, fn));
+    (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_flatMapFn"), fn_ext);
+    
+    v8::Local<v8::Value> argv[] = { options };
+    v8::Local<v8::Object> transform_instance;
+    if (!transform_ctor->NewInstance(context, 1, argv).ToLocal(&transform_instance)) {
+        return;
+    }
+    
+    // Pipe self to the transform
+    v8::Local<v8::Value> pipe_fn_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "pipe")).ToLocal(&pipe_fn_val) && pipe_fn_val->IsFunction()) {
+        v8::Local<v8::Function> pipe_fn = pipe_fn_val.As<v8::Function>();
+        v8::Local<v8::Value> pipe_argv[] = { transform_instance };
+        (void)pipe_fn->Call(context, self, 1, pipe_argv);
+    }
+    
+    args.GetReturnValue().Set(transform_instance);
 }
 
 void Stream::readableDrop(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(v8::Exception::Error(
-        v8::String::NewFromUtf8Literal(p_isolate, "Readable.drop() not yet implemented")));
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    if (args.Length() < 1 || !args[0]->IsNumber()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Number required for drop limit")));
+        return;
+    }
+    
+    int32_t limit = args[0]->Int32Value(context).FromMaybe(0);
+    v8::Local<v8::Object> self = args.This();
+    
+    // Create a Transform stream that drops first N chunks
+    v8::Local<v8::FunctionTemplate> transform_tmpl = getTransformTemplate(p_isolate);
+    v8::Local<v8::Function> transform_ctor;
+    if (!transform_tmpl->GetFunction(context).ToLocal(&transform_ctor)) {
+        return;
+    }
+    
+    v8::Local<v8::Object> options = v8::Object::New(p_isolate);
+    (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_dropLimit"), v8::Integer::New(p_isolate, limit));
+    (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_dropCount"), v8::Integer::New(p_isolate, 0));
+    
+    v8::Local<v8::Value> argv[] = { options };
+    v8::Local<v8::Object> transform_instance;
+    if (!transform_ctor->NewInstance(context, 1, argv).ToLocal(&transform_instance)) {
+        return;
+    }
+    
+    // Pipe self to the transform
+    v8::Local<v8::Value> pipe_fn_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "pipe")).ToLocal(&pipe_fn_val) && pipe_fn_val->IsFunction()) {
+        v8::Local<v8::Function> pipe_fn = pipe_fn_val.As<v8::Function>();
+        v8::Local<v8::Value> pipe_argv[] = { transform_instance };
+        (void)pipe_fn->Call(context, self, 1, pipe_argv);
+    }
+    
+    args.GetReturnValue().Set(transform_instance);
 }
 
 void Stream::readableTake(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(v8::Exception::Error(
-        v8::String::NewFromUtf8Literal(p_isolate, "Readable.take() not yet implemented")));
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    if (args.Length() < 1 || !args[0]->IsNumber()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Number required for take limit")));
+        return;
+    }
+    
+    int32_t limit = args[0]->Int32Value(context).FromMaybe(0);
+    v8::Local<v8::Object> self = args.This();
+    
+    // Create a Transform stream that takes first N chunks
+    v8::Local<v8::FunctionTemplate> transform_tmpl = getTransformTemplate(p_isolate);
+    v8::Local<v8::Function> transform_ctor;
+    if (!transform_tmpl->GetFunction(context).ToLocal(&transform_ctor)) {
+        return;
+    }
+    
+    v8::Local<v8::Object> options = v8::Object::New(p_isolate);
+    (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_takeLimit"), v8::Integer::New(p_isolate, limit));
+    (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_takeCount"), v8::Integer::New(p_isolate, 0));
+    
+    v8::Local<v8::Value> argv[] = { options };
+    v8::Local<v8::Object> transform_instance;
+    if (!transform_ctor->NewInstance(context, 1, argv).ToLocal(&transform_instance)) {
+        return;
+    }
+    
+    // Pipe self to the transform
+    v8::Local<v8::Value> pipe_fn_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "pipe")).ToLocal(&pipe_fn_val) && pipe_fn_val->IsFunction()) {
+        v8::Local<v8::Function> pipe_fn = pipe_fn_val.As<v8::Function>();
+        v8::Local<v8::Value> pipe_argv[] = { transform_instance };
+        (void)pipe_fn->Call(context, self, 1, pipe_argv);
+    }
+    
+    args.GetReturnValue().Set(transform_instance);
 }
 
 void Stream::readableReduce(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
-    p_isolate->ThrowException(v8::Exception::Error(
-        v8::String::NewFromUtf8Literal(p_isolate, "Readable.reduce() not yet implemented")));
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    if (args.Length() < 1 || !args[0]->IsFunction()) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Callback function required")));
+        return;
+    }
+    
+    v8::Local<v8::Function> fn = args[0].As<v8::Function>();
+    v8::Local<v8::Object> self = args.This();
+    
+    // Create a promise that resolves with the reduced value
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(context).ToLocal(&resolver)) {
+        return;
+    }
+    
+    v8::Global<v8::Function>* p_fn = new v8::Global<v8::Function>(p_isolate, fn);
+    v8::Global<v8::Promise::Resolver>* p_resolver = new v8::Global<v8::Promise::Resolver>(p_isolate, resolver);
+    
+    // Check if initial value is provided
+    bool has_initial = args.Length() > 1;
+    v8::Global<v8::Value>* p_accumulator = has_initial ? 
+        new v8::Global<v8::Value>(p_isolate, args[1]) : 
+        new v8::Global<v8::Value>();
+    bool* p_first = new bool(!has_initial);
+    
+    // Listen for 'data' events
+    v8::Local<v8::Value> on_val;
+    if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "on")).ToLocal(&on_val) && on_val->IsFunction()) {
+        v8::Local<v8::Function> on_fn = on_val.As<v8::Function>();
+        
+        // Data handler
+        auto data_callback = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+            v8::Isolate* p_isolate = args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::External> ext = args.Data().As<v8::External>();
+            auto* p_data = static_cast<std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Value>*, bool*>*>(ext->Value());
+            
+            if (*std::get<2>(*p_data)) {
+                // First chunk without initial value
+                *std::get<2>(*p_data) = false;
+                std::get<1>(*p_data)->Reset(p_isolate, args[0]);
+            } else {
+                v8::Local<v8::Function> fn = std::get<0>(*p_data)->Get(p_isolate);
+                v8::Local<v8::Value> accumulator = std::get<1>(*p_data)->Get(p_isolate);
+                v8::Local<v8::Value> fn_argv[] = { accumulator, args[0] };
+                v8::Local<v8::Value> result;
+                if (fn->Call(context, v8::Undefined(p_isolate), 2, fn_argv).ToLocal(&result)) {
+                    std::get<1>(*p_data)->Reset(p_isolate, result);
+                }
+            }
+        };
+        
+        auto* p_callback_data = new std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Value>*, bool*>(p_fn, p_accumulator, p_first);
+        v8::Local<v8::External> data_ext = v8::External::New(p_isolate, p_callback_data);
+        v8::Local<v8::Function> data_handler = v8::Function::New(context, data_callback, data_ext).ToLocalChecked();
+        
+        v8::Local<v8::Value> on_argv[] = { 
+            v8::String::NewFromUtf8Literal(p_isolate, "data"),
+            data_handler
+        };
+        (void)on_fn->Call(context, self, 2, on_argv);
+        
+        // End handler
+        auto end_callback = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+            v8::Isolate* p_isolate = args.GetIsolate();
+            v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+            v8::Local<v8::External> ext = args.Data().As<v8::External>();
+            auto* p_data = static_cast<std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Value>*, v8::Global<v8::Promise::Resolver>*, bool*>*>(ext->Value());
+            
+            v8::Local<v8::Promise::Resolver> resolver = std::get<2>(*p_data)->Get(p_isolate);
+            if (!std::get<1>(*p_data)->IsEmpty()) {
+                v8::Local<v8::Value> result = std::get<1>(*p_data)->Get(p_isolate);
+                (void)resolver->Resolve(context, result);
+            } else {
+                (void)resolver->Resolve(context, v8::Undefined(p_isolate));
+            }
+            
+            delete std::get<0>(*p_data);
+            delete std::get<1>(*p_data);
+            delete std::get<2>(*p_data);
+            delete std::get<3>(*p_data);
+            delete p_data;
+        };
+        
+        auto* p_end_data = new std::tuple<v8::Global<v8::Function>*, v8::Global<v8::Value>*, v8::Global<v8::Promise::Resolver>*, bool*>(
+            p_fn, p_accumulator, p_resolver, p_first);
+        v8::Local<v8::External> end_ext = v8::External::New(p_isolate, p_end_data);
+        v8::Local<v8::Function> end_handler = v8::Function::New(context, end_callback, end_ext).ToLocalChecked();
+        
+        v8::Local<v8::Value> end_argv[] = {
+            v8::String::NewFromUtf8Literal(p_isolate, "end"),
+            end_handler
+        };
+        (void)on_fn->Call(context, self, 2, end_argv);
+    }
+    
+    args.GetReturnValue().Set(resolver->GetPromise());
 }
 
 } // namespace module
