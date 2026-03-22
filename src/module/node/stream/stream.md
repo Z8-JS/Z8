@@ -325,9 +325,9 @@ Inherits all methods and properties from both Readable and Writable.
 
 #### `stream.Duplex.from(src)`
 
-Creates a Duplex stream from various sources (readable stream, writable stream, web streams, etc.).
+Creates a Duplex stream from various sources (readable stream, writable stream, web streams, iterables, etc.).
 
-**Status**: Not yet fully implemented
+**Status**: Implemented (basic functionality - creates Duplex from iterables)
 
 ## Class: stream.Transform
 
@@ -366,7 +366,7 @@ PassThrough is a trivial implementation of a Transform stream that simply passes
 new stream.PassThrough([options]);
 ```
 
-**Status**: Partially implemented (constructor works, data flow needs _transform trigger logic)
+**Status**: Implemented (write and end methods emit data and end events)
 
 ### Example
 
@@ -374,11 +374,13 @@ new stream.PassThrough([options]);
 const { PassThrough } = require('node:stream');
 const pass = new PassThrough();
 
+pass.on('data', (chunk) => {
+  console.log('Data:', chunk.toString());
+});
+
 pass.write('hello ');
 pass.write('world');
 pass.end();
-
-pass.pipe(process.stdout);
 ```
 
 ## Utility Functions

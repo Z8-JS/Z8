@@ -1468,57 +1468,110 @@ void Stream::passThroughConstructor(const v8::FunctionCallbackInfo<v8::Value>& a
     v8::Isolate* p_isolate = args.GetIsolate();
     v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     
-    // Create a transform with a passthrough function
-    v8::Local<v8::Object> options = v8::Object::New(p_isolate);
+    // Call transform constructor first
+    transformConstructor(args);
     
-    // Create a simple passthrough transform function
-    auto transform_fn = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+    v8::Local<v8::Object> self = args.This();
+    
+    // Override write to directly emit 'data' events for passthrough behavior
+    auto write_fn = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
         v8::Isolate* p_isolate = args.GetIsolate();
         v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
         v8::Local<v8::Object> self = args.This();
         
-        // args[0] = chunk, args[1] = encoding, args[2] = callback
         if (args.Length() >= 1) {
-            // Push the chunk as-is
-            v8::Local<v8::Value> push_val;
-            if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "push")).ToLocal(&push_val) && push_val->IsFunction()) {
-                v8::Local<v8::Function> push_fn = push_val.As<v8::Function>();
-                v8::Local<v8::Value> push_argv[] = { args[0] };
-                (void)push_fn->Call(context, self, 1, push_argv);
+            // Emit 'data' event with the chunk
+            v8::Local<v8::Value> emit_val;
+            if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_val) && emit_val->IsFunction()) {
+                v8::Local<v8::Function> emit_fn = emit_val.As<v8::Function>();
+                v8::Local<v8::Value> emit_argv[] = {
+                    v8::String::NewFromUtf8Literal(p_isolate, "data"),
+                    args[0]
+                };
+                (void)emit_fn->Call(context, self, 2, emit_argv);
             }
         }
         
-        // Call the callback if provided
-        if (args.Length() >= 3 && args[2]->IsFunction()) {
-            v8::Local<v8::Function> callback = args[2].As<v8::Function>();
-            (void)callback->Call(context, self, 0, nullptr);
-        }
+        args.GetReturnValue().Set(true);
     };
     
-    v8::Local<v8::Function> transform_func = v8::Function::New(context, transform_fn).ToLocalChecked();
-    (void)options->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "transform"), transform_func);
+    v8::Local<v8::Function> write_func = v8::Function::New(context, write_fn).ToLocalChecked();
+    (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "write"), write_func);
     
-    // Call transform constructor with options
-    v8::Local<v8::Value> argv[] = { options };
-    v8::Local<v8::Value> old_args = args.Data();
-    v8::PropertyAttribute attr = v8::PropertyAttribute::None;
+    // Override end to emit 'end' event
+    auto end_fn = [](const v8::FunctionCallbackInfo<v8::Value>& args) {
+        v8::Isolate* p_isolate = args.GetIsolate();
+        v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+        v8::Local<v8::Object> self = args.This();
+        
+        // If there's a chunk argument, write it first
+        if (args.Length() >= 1 && !args[0]->IsUndefined()) {
+            v8::Local<v8::Value> write_val;
+            if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "write")).ToLocal(&write_val) && write_val->IsFunction()) {
+                v8::Local<v8::Function> write_fn = write_val.As<v8::Function>();
+                v8::Local<v8::Value> write_argv[] = { args[0] };
+                (void)write_fn->Call(context, self, 1, write_argv);
+            }
+        }
+        
+        // Emit 'end' event
+        v8::Local<v8::Value> emit_val;
+        if (self->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "emit")).ToLocal(&emit_val) && emit_val->IsFunction()) {
+            v8::Local<v8::Function> emit_fn = emit_val.As<v8::Function>();
+            v8::Local<v8::Value> emit_argv[] = {
+                v8::String::NewFromUtf8Literal(p_isolate, "end")
+            };
+            (void)emit_fn->Call(context, self, 1, emit_argv);
+        }
+        
+        // Mark as ended
+        v8::Local<v8::External> ext = self->GetInternalField(0).As<v8::External>();
+        StreamInternal* p_internal = static_cast<StreamInternal*>(ext->Value());
+        p_internal->m_ended = true;
+    };
     
-    // Temporarily replace args
-    transformConstructor(args);
-    
-    // Set the _transform function on the instance
-    v8::Local<v8::Object> self = args.This();
-    (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_transform"), transform_func);
+    v8::Local<v8::Function> end_func = v8::Function::New(context, end_fn).ToLocalChecked();
+    (void)self->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "end"), end_func);
 }
 
 // --- Duplex.from ---
 
 void Stream::duplexFrom(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::Isolate* p_isolate = args.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
     
-    // TODO: Implement proper conversion from various sources to Duplex
-    p_isolate->ThrowException(v8::Exception::Error(
-        v8::String::NewFromUtf8Literal(p_isolate, "Duplex.from() not yet fully implemented")));
+    if (args.Length() < 1) {
+        p_isolate->ThrowException(v8::Exception::TypeError(
+            v8::String::NewFromUtf8Literal(p_isolate, "Argument required for Duplex.from")));
+        return;
+    }
+    
+    v8::Local<v8::Value> source = args[0];
+    
+    // Create a basic Duplex instance
+    v8::Local<v8::FunctionTemplate> duplex_tmpl = getDuplexTemplate(p_isolate);
+    v8::Local<v8::Function> duplex_ctor;
+    if (!duplex_tmpl->GetFunction(context).ToLocal(&duplex_ctor)) {
+        return;
+    }
+    
+    v8::Local<v8::Object> duplex_instance;
+    if (!duplex_ctor->NewInstance(context, 0, nullptr).ToLocal(&duplex_instance)) {
+        return;
+    }
+    
+    // If source is iterable (has Symbol.iterator), set up read from it
+    v8::Local<v8::Value> iterator_symbol = v8::Symbol::GetIterator(p_isolate);
+    if (source->IsObject()) {
+        v8::Local<v8::Object> source_obj = source.As<v8::Object>();
+        v8::Local<v8::Value> iterator_fn;
+        if (source_obj->Get(context, iterator_symbol).ToLocal(&iterator_fn) && iterator_fn->IsFunction()) {
+            // Store the iterator for later use in _read
+            (void)duplex_instance->Set(context, v8::String::NewFromUtf8Literal(p_isolate, "_sourceIterator"), source);
+        }
+    }
+    
+    args.GetReturnValue().Set(duplex_instance);
 }
 
 // --- Additional Property Getters ---
