@@ -152,12 +152,34 @@ static bool isWindowsReservedName(const char* p_path) {
 
 static inline bool isPathSafe(const char* p_path) {
     if (!p_path || p_path[0] == '\0') return false;
+
+    // Reject absolute paths and Windows drive letters. Once the path is
+    // joined with the working directory, an absolute path would resolve
+    // outside the sandbox; a drive letter is Windows-only and outside
+    // the slash-encoded path space.
     if (p_path[0] == '/' || p_path[0] == '\\') return false;
     if (p_path[0] != '\0' && p_path[1] == ':') return false;
 
-    for (const char* p = p_path; *p; ++p) {
-        if (*p == '.' && *(p + 1) == '.') return false;
+    // Issue #18: rejection of `..` was scanning the whole string for any
+    // pair of consecutive dots, which refused legitimate filenames like
+    // `file..txt`, `v1..0-release`, or `a...b`. The fix is to split on
+    // path separators and only reject a component that is *exactly*
+    // `..` (the only sequence that escapes the directory). A component
+    // like `file..txt` is fine; a component like `..` is not.
+    {
+        const char* p_seg_start = p_path;
+        for (const char* p = p_path;; ++p) {
+            if (*p == '/' || *p == '\\' || *p == '\0') {
+                size_t seg_len = static_cast<size_t>(p - p_seg_start);
+                if (seg_len == 2 && p_seg_start[0] == '.' && p_seg_start[1] == '.') {
+                    return false;
+                }
+                if (*p == '\0') break;
+                p_seg_start = p + 1;
+            }
+        }
     }
+
 #ifdef _WIN32
     // Block Windows reserved device names (CON, NUL, PRN, AUX, COM1-9, LPT1-9).
     // These are reserved by basename without extension (e.g. CON.txt is also
