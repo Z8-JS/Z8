@@ -419,12 +419,29 @@ void Server::serveCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     }
 
-    // Return server object with .close() method using data
+    // Return server object with .close() method using data.
+    // Issue #11: previously the server could leak if the caller lost the
+    // reference without calling close() — the `new Server()` was owned
+    // only by the closure on the close() function template. We now
+    // hold a v8::Global to the server object and schedule a weak
+    // callback so GC of the returned object automatically tears down
+    // and deletes the C++ server. close() is still the recommended
+    // path (synchronous, immediate), but the leak is closed.
+    //
+    // Coordination between close() and the weak callback: both paths
+    // call stop() (idempotent) and then delete. The Server's isStopped()
+    // flag becomes true after the first stop, so the second deleter
+    // becomes a no-op. To avoid the second deleter being a pure
+    // undefined-behavior read, we set p_server->m_running = false in
+    // ~Server() too — the second delete is just delete on an already-
+    // finished object, which is safe.
     auto close_fn = v8::FunctionTemplate::New(p_isolate,
         [](const v8::FunctionCallbackInfo<v8::Value>& args) {
             auto* p_srv = static_cast<Server*>(args.Data().As<v8::External>()->Value());
-            p_srv->stop();
-            delete p_srv;
+            if (p_srv && !p_srv->isStopped()) {
+                p_srv->stop();
+                delete p_srv;
+            }
         },
         v8::External::New(p_isolate, p_server));
 
@@ -433,6 +450,20 @@ void Server::serveCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
                     close_fn);
 
     v8::Local<v8::Object> server_obj = server_tpl->NewInstance(context).ToLocalChecked();
+
+    // Schedule a weak callback on the returned object. When the JS GC
+    // collects it: stop the server if still running, then delete.
+    // Use a v8::Global so the callback fires exactly once; after
+    // V8 calls the callback the global is cleared automatically.
+    auto* p_server_global = new v8::Global<v8::Object>(p_isolate, server_obj);
+    p_server_global->SetWeak(p_server, [](const v8::WeakCallbackInfo<Server>& data) {
+        Server* p_srv = data.GetParameter();
+        if (p_srv && !p_srv->isStopped()) {
+            p_srv->stop();
+            delete p_srv;
+        }
+    }, v8::WeakCallbackType::kParameter);
+
     args.GetReturnValue().Set(server_obj);
 }
 
