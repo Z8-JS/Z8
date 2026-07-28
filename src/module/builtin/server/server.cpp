@@ -90,6 +90,15 @@ bool Server::start(uint16_t port, const std::string& hostname, RequestHandler ha
     trantor::InetAddress addr(hostname, port, false);
     up_tcp_server = std::make_unique<trantor::TcpServer>(p_loop, addr, "ZaneServer");
 
+    // Issue #8: slowloris defense. Without an idle timeout, an attacker can
+    // open a connection, send one byte at a time, and hold the socket open
+    // forever — exhausting FDs and memory. Trantor's kickoffIdleConnections
+    // walks the live connection set every `timeout` seconds and closes any
+    // connection that hasn't been read from or written to. 30s is enough for
+    // normal HTTP traffic (including chunked uploads on slow links) and
+    // tight enough that a slowloris attacker can't keep many sockets alive.
+    up_tcp_server->kickoffIdleConnections(30);
+
     // Set connection callback
     up_tcp_server->setConnectionCallback([this](const trantor::TcpConnectionPtr& p_conn) {
         this->onConnection(p_conn);
@@ -223,7 +232,12 @@ void Server::serveCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     // Parse hostname
-    std::string hostname = "0.0.0.0";
+    // Issue #13: default to loopback (127.0.0.1) instead of 0.0.0.0. Binding
+    // to 0.0.0.0 silently exposes the service on every interface, which is
+    // rarely what a dev or single-user Zane app actually wants. Apps that
+    // intentionally want to be on public interfaces can still pass
+    // `hostname: "0.0.0.0"` or `"::"` explicitly.
+    std::string hostname = "127.0.0.1";
     v8::Local<v8::Value> hostname_val;
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "hostname")).ToLocal(&hostname_val) &&
         hostname_val->IsString()) {
