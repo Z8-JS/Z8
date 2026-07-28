@@ -15,6 +15,14 @@
 namespace zane {
 namespace module {
 
+// Decompression bomb + chunkSize guard. Applied uniformly to zlib, brotli,
+// and zstd paths so a 1 MB compressed payload can't be expanded to GBs.
+// See issue #17. These bounds are generous enough for any legitimate
+// in-process use; raise kDefaultMaxOutput only if you actually need more.
+static constexpr int32_t kMinChunkSize = 64;        // 64 bytes
+static constexpr int32_t kMaxChunkSize = 1 << 20;   // 1 MB
+static constexpr size_t kDefaultMaxOutput = 512LL * 1024 * 1024;  // 512 MB
+
 // Forward declarations for stream methods
 static void streamWrite(const v8::FunctionCallbackInfo<v8::Value>& args);
 static void streamFlush(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -113,6 +121,12 @@ static void parseZlibOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> cont
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "chunkSize")).ToLocal(&val) && val->IsNumber()) {
         chunk_size = val->Int32Value(context).FromMaybe(chunk_size);
     }
+
+    // Clamp chunkSize to a sane range. Without this, a user-supplied
+    // {chunkSize: 2_000_000_000} causes an immediate ~2 GB allocation.
+    if (chunk_size < kMinChunkSize) chunk_size = kMinChunkSize;
+    if (chunk_size > kMaxChunkSize) chunk_size = kMaxChunkSize;
+
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "dictionary")).ToLocal(&val)) {
         if (val->IsUint8Array()) {
             v8::Local<v8::Uint8Array> dict = val.As<v8::Uint8Array>();
@@ -123,6 +137,11 @@ static void parseZlibOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> cont
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "maxOutputLength")).ToLocal(&val) && val->IsNumber()) {
         max_output_length = (size_t)val->NumberValue(context).FromMaybe((double)max_output_length);
     }
+
+    // Apply a default cap when the user didn't set one. 0 currently means
+    // "no limit" which is the decompression-bomb vulnerability.
+    if (max_output_length == 0) max_output_length = kDefaultMaxOutput;
+
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "info")).ToLocal(&val) && val->IsBoolean()) {
         info = val->BooleanValue(p_isolate);
     }
@@ -171,9 +190,20 @@ static void parseBrotliOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> co
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "chunkSize")).ToLocal(&val) && val->IsNumber()) {
         chunk_size = val->Int32Value(context).FromMaybe(chunk_size);
     }
+
+    // Clamp chunkSize to a sane range. Without this, a user-supplied
+    // {chunkSize: 2_000_000_000} causes an immediate ~2 GB allocation.
+    if (chunk_size < kMinChunkSize) chunk_size = kMinChunkSize;
+    if (chunk_size > kMaxChunkSize) chunk_size = kMaxChunkSize;
+
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "maxOutputLength")).ToLocal(&val) && val->IsNumber()) {
         max_output_length = (size_t)val->NumberValue(context).FromMaybe((double)max_output_length);
     }
+
+    // Apply a default cap when the user didn't set one. 0 currently means
+    // "no limit" which is the decompression-bomb vulnerability.
+    if (max_output_length == 0) max_output_length = kDefaultMaxOutput;
+
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "dictionary")).ToLocal(&val) && (val->IsUint8Array() || val->IsArrayBuffer())) {
         if (val->IsUint8Array()) {
             v8::Local<v8::Uint8Array> view = val.As<v8::Uint8Array>();
@@ -211,6 +241,12 @@ static void parseZstdOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> cont
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "chunkSize")).ToLocal(&val) && val->IsNumber()) {
         chunk_size = val->Int32Value(context).FromMaybe(chunk_size);
     }
+
+    // Clamp chunkSize to a sane range. Without this, a user-supplied
+    // {chunkSize: 2_000_000_000} causes an immediate ~2 GB allocation.
+    if (chunk_size < kMinChunkSize) chunk_size = kMinChunkSize;
+    if (chunk_size > kMaxChunkSize) chunk_size = kMaxChunkSize;
+
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "dictionary")).ToLocal(&val) && (val->IsUint8Array() || val->IsArrayBuffer())) {
         if (val->IsUint8Array()) {
             v8::Local<v8::Uint8Array> view = val.As<v8::Uint8Array>();
