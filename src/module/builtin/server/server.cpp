@@ -134,12 +134,32 @@ bool Server::start(uint16_t port, const std::string& hostname, RequestHandler ha
                 std::move(parsed.m_body)
             );
 
+            // Issue #14: the response callback used to call p_conn->send()
+            // directly from the V8 thread that runs the JS fetch handler.
+            // Trantor's TcpConnection requires its owning loop thread to be
+            // the only writer; calling send() from another thread is a
+            // data race (the write buffer and the lifecycle are both
+            // touched without synchronization). The fix is to capture the
+            // connection as a shared_ptr and dispatch each send through the
+            // connection's event loop, which is the only thread that
+            // should touch the buffer.
+            auto p_conn_sp = p_conn;  // shared_ptr<TcpConnection> is already shared
             auto* p_res = new Response(
-                [p_conn](int32_t status, const std::map<std::string, std::string>& headers,
+                [p_conn_sp](int32_t status, const std::map<std::string, std::string>& headers,
                           const std::vector<uint8_t>& body) {
                     std::string http_resp = zane::http::buildResponse(
                         status, "OK", headers, body.data(), body.size());
-                    p_conn->send(http_resp.data(), http_resp.size());
+                    if (!p_conn_sp->connected()) return;
+                    auto* p_loop = p_conn_sp->getLoop();
+                    // Capture the data by value so the lambda owns the
+                    // response bytes; the raw pointer into http_resp is
+                    // stable until the lambda returns.
+                    std::string resp_copy = std::move(http_resp);
+                    p_loop->runInLoop([p_conn_sp, resp_copy = std::move(resp_copy)]() {
+                        if (p_conn_sp->connected()) {
+                            p_conn_sp->send(resp_copy.data(), resp_copy.size());
+                        }
+                    });
                 }
             );
 
