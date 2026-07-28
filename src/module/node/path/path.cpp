@@ -511,7 +511,10 @@ void Path::basenamePosix(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     v8::String::Utf8Value val(p_isolate, args[0]);
     std::string p = *val;
-    if (p.back() == '/')
+    // Issue #19 (bug 1): p.back() on an empty std::string is UB (C++ §24.4.5.2).
+    // In practice it reads out-of-bounds heap memory, which can leak data or
+    // crash. Guard with the empty check first.
+    if (!p.empty() && p.back() == '/')
         p.pop_back(); // Remove trailing slash
     size_t last_slash = p.find_last_of('/');
     std::string base = (last_slash == std::string::npos) ? p : p.substr(last_slash + 1);
@@ -532,6 +535,13 @@ void Path::extnamePosix(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     v8::String::Utf8Value val(p_isolate, args[0]);
     std::string p = *val;
+    // Defensive: empty path can't have an extension. Returns "" instead of
+    // leaving last_dot as npos (which is already handled below, but makes
+    // intent explicit).
+    if (p.empty()) {
+        args.GetReturnValue().Set(v8::String::NewFromUtf8Literal(p_isolate, ""));
+        return;
+    }
     size_t last_slash = p.find_last_of('/');
     size_t last_dot = p.find_last_of('.');
 

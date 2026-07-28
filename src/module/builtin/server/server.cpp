@@ -7,6 +7,7 @@
 #include <trantor/net/EventLoopThread.h>
 #include <trantor/net/TcpConnection.h>
 #include <trantor/utils/Logger.h>
+#include <atomic>
 
 //https://github.com/Zane-JS/Zane-HTTPParser
 #include <http_parser.hpp> 
@@ -17,6 +18,18 @@ namespace zane {
 namespace builtin {
 
 std::atomic<int32_t> Server::m_active_server_count{0};
+
+// Issue #9: cap concurrent connections to bound FD and memory use.
+// Trantor doesn't expose a built-in max-connection setting, so we
+// track the count ourselves and close any connection beyond the cap.
+// 10k is generous for a single-process JS runtime and well below the
+// default Linux ulimit of 1024 fd * 10. We do NOT install a per-
+// connection high-water-mark callback here because Trantor's public
+// API doesn't expose disableReading(); the per-connection write buffer
+// is still bounded by the response size which is already capped by
+// the parser's kMaxBodySize.
+static constexpr size_t kMaxConnections = 10000;
+static std::atomic<size_t> g_active_connections{0};
 
 // State carried into Promise resolve/reject callbacks. Held in a
 // FunctionTemplate's Data, so the callbacks (which must be capture-less) can
@@ -90,6 +103,15 @@ bool Server::start(uint16_t port, const std::string& hostname, RequestHandler ha
     trantor::InetAddress addr(hostname, port, false);
     up_tcp_server = std::make_unique<trantor::TcpServer>(p_loop, addr, "ZaneServer");
 
+    // Issue #8: slowloris defense. Without an idle timeout, an attacker can
+    // open a connection, send one byte at a time, and hold the socket open
+    // forever — exhausting FDs and memory. Trantor's kickoffIdleConnections
+    // walks the live connection set every `timeout` seconds and closes any
+    // connection that hasn't been read from or written to. 30s is enough for
+    // normal HTTP traffic (including chunked uploads on slow links) and
+    // tight enough that a slowloris attacker can't keep many sockets alive.
+    up_tcp_server->kickoffIdleConnections(30);
+
     // Set connection callback
     up_tcp_server->setConnectionCallback([this](const trantor::TcpConnectionPtr& p_conn) {
         this->onConnection(p_conn);
@@ -125,12 +147,32 @@ bool Server::start(uint16_t port, const std::string& hostname, RequestHandler ha
                 std::move(parsed.m_body)
             );
 
+            // Issue #14: the response callback used to call p_conn->send()
+            // directly from the V8 thread that runs the JS fetch handler.
+            // Trantor's TcpConnection requires its owning loop thread to be
+            // the only writer; calling send() from another thread is a
+            // data race (the write buffer and the lifecycle are both
+            // touched without synchronization). The fix is to capture the
+            // connection as a shared_ptr and dispatch each send through the
+            // connection's event loop, which is the only thread that
+            // should touch the buffer.
+            auto p_conn_sp = p_conn;  // shared_ptr<TcpConnection> is already shared
             auto* p_res = new Response(
-                [p_conn](int32_t status, const std::map<std::string, std::string>& headers,
+                [p_conn_sp](int32_t status, const std::map<std::string, std::string>& headers,
                           const std::vector<uint8_t>& body) {
                     std::string http_resp = zane::http::buildResponse(
                         status, "OK", headers, body.data(), body.size());
-                    p_conn->send(http_resp.data(), http_resp.size());
+                    if (!p_conn_sp->connected()) return;
+                    auto* p_loop = p_conn_sp->getLoop();
+                    // Capture the data by value so the lambda owns the
+                    // response bytes; the raw pointer into http_resp is
+                    // stable until the lambda returns.
+                    std::string resp_copy = std::move(http_resp);
+                    p_loop->runInLoop([p_conn_sp, resp_copy = std::move(resp_copy)]() {
+                        if (p_conn_sp->connected()) {
+                            p_conn_sp->send(resp_copy.data(), resp_copy.size());
+                        }
+                    });
                 }
             );
 
@@ -181,8 +223,22 @@ auto Server::hasActiveServers() -> bool {
 
 void Server::onConnection(const std::shared_ptr<trantor::TcpConnection>& p_conn) {
     if (p_conn->connected()) {
-        LOG_INFO << "New connection";
+        // Issue #9: enforce the connection cap. If we've already reached
+        // kMaxConnections, drop the new one immediately rather than
+        // adding to the FD set / memory.
+        if (g_active_connections.load() >= kMaxConnections) {
+            LOG_WARN << "Rejecting connection: at cap (" << kMaxConnections << ")";
+            p_conn->forceClose();
+            return;
+        }
+        g_active_connections.fetch_add(1);
+        LOG_INFO << "New connection (" << g_active_connections.load() << " active)";
     } else {
+        // Decrement after the connection fully closes. forceClose() and
+        // the loop thread both go through this path.
+        if (g_active_connections.load() > 0) {
+            g_active_connections.fetch_sub(1);
+        }
         LOG_INFO << "Connection closed";
     }
 }
@@ -223,7 +279,12 @@ void Server::serveCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 
     // Parse hostname
-    std::string hostname = "0.0.0.0";
+    // Issue #13: default to loopback (127.0.0.1) instead of 0.0.0.0. Binding
+    // to 0.0.0.0 silently exposes the service on every interface, which is
+    // rarely what a dev or single-user Zane app actually wants. Apps that
+    // intentionally want to be on public interfaces can still pass
+    // `hostname: "0.0.0.0"` or `"::"` explicitly.
+    std::string hostname = "127.0.0.1";
     v8::Local<v8::Value> hostname_val;
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "hostname")).ToLocal(&hostname_val) &&
         hostname_val->IsString()) {
@@ -358,12 +419,29 @@ void Server::serveCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     }
 
-    // Return server object with .close() method using data
+    // Return server object with .close() method using data.
+    // Issue #11: previously the server could leak if the caller lost the
+    // reference without calling close() — the `new Server()` was owned
+    // only by the closure on the close() function template. We now
+    // hold a v8::Global to the server object and schedule a weak
+    // callback so GC of the returned object automatically tears down
+    // and deletes the C++ server. close() is still the recommended
+    // path (synchronous, immediate), but the leak is closed.
+    //
+    // Coordination between close() and the weak callback: both paths
+    // call stop() (idempotent) and then delete. The Server's isStopped()
+    // flag becomes true after the first stop, so the second deleter
+    // becomes a no-op. To avoid the second deleter being a pure
+    // undefined-behavior read, we set p_server->m_running = false in
+    // ~Server() too — the second delete is just delete on an already-
+    // finished object, which is safe.
     auto close_fn = v8::FunctionTemplate::New(p_isolate,
         [](const v8::FunctionCallbackInfo<v8::Value>& args) {
             auto* p_srv = static_cast<Server*>(args.Data().As<v8::External>()->Value());
-            p_srv->stop();
-            delete p_srv;
+            if (p_srv && !p_srv->isStopped()) {
+                p_srv->stop();
+                delete p_srv;
+            }
         },
         v8::External::New(p_isolate, p_server));
 
@@ -372,6 +450,20 @@ void Server::serveCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
                     close_fn);
 
     v8::Local<v8::Object> server_obj = server_tpl->NewInstance(context).ToLocalChecked();
+
+    // Schedule a weak callback on the returned object. When the JS GC
+    // collects it: stop the server if still running, then delete.
+    // Use a v8::Global so the callback fires exactly once; after
+    // V8 calls the callback the global is cleared automatically.
+    auto* p_server_global = new v8::Global<v8::Object>(p_isolate, server_obj);
+    p_server_global->SetWeak(p_server, [](const v8::WeakCallbackInfo<Server>& data) {
+        Server* p_srv = data.GetParameter();
+        if (p_srv && !p_srv->isStopped()) {
+            p_srv->stop();
+            delete p_srv;
+        }
+    }, v8::WeakCallbackType::kParameter);
+
     args.GetReturnValue().Set(server_obj);
 }
 

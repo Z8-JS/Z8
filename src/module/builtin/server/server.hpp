@@ -47,6 +47,11 @@ class Server {
     // V8 static callback: Zane.serve() (used by builtin registration)
     static void serveCallback(const v8::FunctionCallbackInfo<v8::Value>& args);
 
+    // True if `stop()` has been called (or the weak callback has run).
+    // The weak callback and the explicit close() both need to coordinate
+    // so we don't double-delete the Server.
+    bool isStopped() const { return !m_running; }
+
   private:
     std::unique_ptr<trantor::TcpServer> up_tcp_server;
     std::unique_ptr<trantor::EventLoopThread> up_loop_thread;
