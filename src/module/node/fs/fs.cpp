@@ -2756,6 +2756,12 @@ void FS::rmdir(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::String::Utf8Value path(p_isolate, args[0]);
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
 
     auto p_ctx = new RmdirCtx();
     p_ctx->m_path = *path;
@@ -2802,6 +2808,14 @@ void FS::rmdirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::String::Utf8Value path(p_isolate, args[0]);
     auto p_ctx = new RmdirCtx();
     p_ctx->m_path = *path;
+    if (!isPathSafe(*path)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                         .ToLocalChecked())
+            .Check();
+        return;
+    }
 
     zane::Task* p_task = new zane::Task();
     p_task->m_resolver.Reset(p_isolate, p_resolver);
@@ -2849,6 +2863,12 @@ void FS::rename(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::String::Utf8Value old_path(p_isolate, args[0]);
     v8::String::Utf8Value new_path(p_isolate, args[1]);
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+    if (!isPathSafe(*old_path) || !isPathSafe(*new_path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
 
     auto p_ctx = new RenameCtx();
     p_ctx->m_old_path = *old_path;
@@ -2896,6 +2916,14 @@ void FS::renamePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::String::Utf8Value old_path(p_isolate, args[0]);
     v8::String::Utf8Value new_path(p_isolate, args[1]);
     auto p_ctx = new RenameCtx();
+    if (!isPathSafe(*old_path) || !isPathSafe(*new_path)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                         .ToLocalChecked())
+            .Check();
+        return;
+    }
     p_ctx->m_old_path = *old_path;
     p_ctx->m_new_path = *new_path;
 
@@ -2946,6 +2974,12 @@ void FS::copyFile(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::String::Utf8Value src(p_isolate, args[0]);
     v8::String::Utf8Value dest(p_isolate, args[1]);
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+    if (!isPathSafe(*src) || !isPathSafe(*dest)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
 
     auto p_ctx = new CopyFileCtx();
     p_ctx->m_src = *src;
@@ -3002,6 +3036,14 @@ void FS::copyFilePromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::String::Utf8Value src(p_isolate, args[0]);
     v8::String::Utf8Value dest(p_isolate, args[1]);
     auto p_ctx = new CopyFileCtx();
+    if (!isPathSafe(*src) || !isPathSafe(*dest)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                         .ToLocalChecked())
+            .Check();
+        return;
+    }
     p_ctx->m_src = *src;
     p_ctx->m_dest = *dest;
 
@@ -4131,6 +4173,12 @@ void FS::open(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     v8::String::Utf8Value path(p_isolate, args[0]);
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
     int32_t flags = 0;
     if (args.Length() >= 2) {
         if (args[1]->IsInt32())
@@ -4203,6 +4251,14 @@ void FS::openPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     args.GetReturnValue().Set(p_resolver->GetPromise());
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (!isPathSafe(*path)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                         .ToLocalChecked())
+            .Check();
+        return;
+    }
     int32_t flags = O_RDONLY;
     if (args.Length() >= 2 && args[1]->IsInt32())
         flags = args[1]->Int32Value(p_context).FromMaybe(O_RDONLY);
@@ -4647,6 +4703,12 @@ void FS::rm(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::String::Utf8Value path(p_isolate, args[0]);
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
 
     auto p_ctx = new RmCtx();
     p_ctx->m_path = *path;
@@ -4705,6 +4767,14 @@ void FS::rmPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::String::Utf8Value path(p_isolate, args[0]);
     auto p_ctx = new RmCtx();
+    if (!isPathSafe(*path)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                         .ToLocalChecked())
+            .Check();
+        return;
+    }
     p_ctx->m_path = *path;
 
     if (args.Length() >= 2 && args[1]->IsObject()) {
@@ -4764,6 +4834,12 @@ void FS::cp(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::String::Utf8Value src(p_isolate, args[0]);
     v8::String::Utf8Value dest(p_isolate, args[1]);
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+    if (!isPathSafe(*src) || !isPathSafe(*dest)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
 
     auto p_ctx = new CopyCtx();
     p_ctx->m_src = *src;
@@ -4811,6 +4887,14 @@ void FS::cpPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::String::Utf8Value src(p_isolate, args[0]);
     v8::String::Utf8Value dest(p_isolate, args[1]);
     auto p_ctx = new CopyCtx();
+    if (!isPathSafe(*src) || !isPathSafe(*dest)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                         .ToLocalChecked())
+            .Check();
+        return;
+    }
     p_ctx->m_src = *src;
     p_ctx->m_dest = *dest;
 
@@ -4971,6 +5055,12 @@ void FS::cpSync(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
     v8::String::Utf8Value src(p_isolate, args[0]);
     v8::String::Utf8Value dest(p_isolate, args[1]);
+    if (!isPathSafe(*src) || !isPathSafe(*dest)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
     std::error_code ec;
     fs::copy(*src, *dest, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
     if (ec) {
@@ -5378,6 +5468,12 @@ void FS::mkdtemp(const v8::FunctionCallbackInfo<v8::Value>& args) {
         return;
     v8::String::Utf8Value prefix(p_isolate, args[0]);
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+    if (!isPathSafe(*prefix)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
 
     auto p_ctx = new MkdtempCtx();
     p_ctx->m_prefix = *prefix;
@@ -5443,6 +5539,12 @@ void FS::mkdtempPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(p_resolver->GetPromise());
 
     v8::String::Utf8Value prefix(p_isolate, args[0]);
+    if (!isPathSafe(*prefix)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
 
     auto p_ctx = new MkdtempCtx();
     p_ctx->m_prefix = *prefix;
@@ -5725,6 +5827,12 @@ void FS::lutimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
     if (args.Length() < 4 || !args[0]->IsString() || !args[args.Length() - 1]->IsFunction())
         return;
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
     double atime = args[1]->NumberValue(p_context).FromMaybe(0);
     double mtime = args[2]->NumberValue(p_context).FromMaybe(0);
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
@@ -5807,6 +5915,14 @@ void FS::lutimesPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(p_resolver->GetPromise());
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (!isPathSafe(*path)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                         .ToLocalChecked())
+            .Check();
+        return;
+    }
     double atime = args[1]->NumberValue(p_context).FromMaybe(0);
     double mtime = args[2]->NumberValue(p_context).FromMaybe(0);
 
@@ -6198,6 +6314,12 @@ void FS::opendir(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::String::Utf8Value path(p_isolate, args[0]);
     v8::Local<v8::Function> p_cb = args[args.Length() - 1].As<v8::Function>();
+    if (!isPathSafe(*path)) {
+        p_isolate->ThrowException(
+            v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                .ToLocalChecked());
+        return;
+    }
 
     struct OpendirCtx {
         std::string m_path;
@@ -6233,6 +6355,14 @@ void FS::opendirPromise(const v8::FunctionCallbackInfo<v8::Value>& args) {
     args.GetReturnValue().Set(p_resolver->GetPromise());
 
     v8::String::Utf8Value path(p_isolate, args[0]);
+    if (!isPathSafe(*path)) {
+        p_resolver
+            ->Reject(p_context,
+                     v8::String::NewFromUtf8(p_isolate, "SecurityError: Path validation failed (traversal detected)")
+                         .ToLocalChecked())
+            .Check();
+        return;
+    }
 
     struct OpendirCtx {
         std::string m_path;
@@ -6695,6 +6825,11 @@ void FS::createReadStream(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::String::Utf8Value path_val(p_isolate, args[0]);
     std::string path = *path_val;
+    if (!isPathSafe(path.c_str())) {
+        p_isolate->ThrowException(
+            v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "SecurityError: Path validation failed (traversal detected)")));
+        return;
+    }
 
     int32_t fd = -1;
 #ifdef _WIN32
@@ -6785,6 +6920,11 @@ void FS::createWriteStream(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     v8::String::Utf8Value path_val(p_isolate, args[0]);
     std::string path = *path_val;
+    if (!isPathSafe(path.c_str())) {
+        p_isolate->ThrowException(
+            v8::Exception::Error(v8::String::NewFromUtf8Literal(p_isolate, "SecurityError: Path validation failed (traversal detected)")));
+        return;
+    }
 
     int32_t fd = -1;
 #ifdef _WIN32
