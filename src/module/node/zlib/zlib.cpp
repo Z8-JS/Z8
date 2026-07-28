@@ -127,11 +127,33 @@ static void parseZlibOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> cont
     if (chunk_size < kMinChunkSize) chunk_size = kMinChunkSize;
     if (chunk_size > kMaxChunkSize) chunk_size = kMaxChunkSize;
 
-    if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "dictionary")).ToLocal(&val)) {
+    // Issue #19 bug 3: dictionary must be a non-detached ArrayBuffer/Uint8Array.
+    // If the user detaches the buffer between the V8 call and the async
+    // execution, p_data becomes a stale pointer and we read freed memory.
+    // We also previously parsed the "dictionary" key twice (the first block
+    // at the original line 130 only handled Uint8Array; the second at
+    // 148 handled both). The second block overwrites the first, so the
+    // first one was dead code. Keep just the second block with the
+    // IsDetached() guard.
+    if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "dictionary")).ToLocal(&val) && (val->IsUint8Array() || val->IsArrayBuffer())) {
         if (val->IsUint8Array()) {
-            v8::Local<v8::Uint8Array> dict = val.As<v8::Uint8Array>();
-            dictionary.assign(static_cast<uint8_t*>(dict->Buffer()->GetBackingStore()->Data()) + dict->ByteOffset(),
-                              static_cast<uint8_t*>(dict->Buffer()->GetBackingStore()->Data()) + dict->ByteOffset() + dict->ByteLength());
+            v8::Local<v8::Uint8Array> view = val.As<v8::Uint8Array>();
+            if (view->Buffer()->IsDetached()) {
+                p_isolate->ThrowException(v8::Exception::TypeError(
+                    v8::String::NewFromUtf8Literal(p_isolate, "dictionary ArrayBuffer is detached")));
+                return;
+            }
+            uint8_t* p_data = static_cast<uint8_t*>(view->Buffer()->GetBackingStore()->Data()) + view->ByteOffset();
+            dictionary.assign(p_data, p_data + view->ByteLength());
+        } else {
+            v8::Local<v8::ArrayBuffer> ab = val.As<v8::ArrayBuffer>();
+            if (ab->IsDetached()) {
+                p_isolate->ThrowException(v8::Exception::TypeError(
+                    v8::String::NewFromUtf8Literal(p_isolate, "dictionary ArrayBuffer is detached")));
+                return;
+            }
+            uint8_t* p_data = static_cast<uint8_t*>(ab->GetBackingStore()->Data());
+            dictionary.assign(p_data, p_data + ab->ByteLength());
         }
     }
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "maxOutputLength")).ToLocal(&val) && val->IsNumber()) {
@@ -148,10 +170,20 @@ static void parseZlibOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> cont
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "dictionary")).ToLocal(&val) && (val->IsUint8Array() || val->IsArrayBuffer())) {
         if (val->IsUint8Array()) {
             v8::Local<v8::Uint8Array> view = val.As<v8::Uint8Array>();
+            if (view->Buffer()->IsDetached()) {
+                p_isolate->ThrowException(v8::Exception::TypeError(
+                    v8::String::NewFromUtf8Literal(p_isolate, "dictionary ArrayBuffer is detached")));
+                return;
+            }
             uint8_t* p_data = static_cast<uint8_t*>(view->Buffer()->GetBackingStore()->Data()) + view->ByteOffset();
             dictionary.assign(p_data, p_data + view->ByteLength());
         } else {
             v8::Local<v8::ArrayBuffer> ab = val.As<v8::ArrayBuffer>();
+            if (ab->IsDetached()) {
+                p_isolate->ThrowException(v8::Exception::TypeError(
+                    v8::String::NewFromUtf8Literal(p_isolate, "dictionary ArrayBuffer is detached")));
+                return;
+            }
             uint8_t* p_data = static_cast<uint8_t*>(ab->GetBackingStore()->Data());
             dictionary.assign(p_data, p_data + ab->ByteLength());
         }
@@ -207,10 +239,20 @@ static void parseBrotliOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> co
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "dictionary")).ToLocal(&val) && (val->IsUint8Array() || val->IsArrayBuffer())) {
         if (val->IsUint8Array()) {
             v8::Local<v8::Uint8Array> view = val.As<v8::Uint8Array>();
+            if (view->Buffer()->IsDetached()) {
+                p_isolate->ThrowException(v8::Exception::TypeError(
+                    v8::String::NewFromUtf8Literal(p_isolate, "dictionary ArrayBuffer is detached")));
+                return;
+            }
             uint8_t* p_data = static_cast<uint8_t*>(view->Buffer()->GetBackingStore()->Data()) + view->ByteOffset();
             dictionary.assign(p_data, p_data + view->ByteLength());
         } else {
             v8::Local<v8::ArrayBuffer> ab = val.As<v8::ArrayBuffer>();
+            if (ab->IsDetached()) {
+                p_isolate->ThrowException(v8::Exception::TypeError(
+                    v8::String::NewFromUtf8Literal(p_isolate, "dictionary ArrayBuffer is detached")));
+                return;
+            }
             uint8_t* p_data = static_cast<uint8_t*>(ab->GetBackingStore()->Data());
             dictionary.assign(p_data, p_data + ab->ByteLength());
         }
@@ -250,10 +292,20 @@ static void parseZstdOptions(v8::Isolate* p_isolate, v8::Local<v8::Context> cont
     if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "dictionary")).ToLocal(&val) && (val->IsUint8Array() || val->IsArrayBuffer())) {
         if (val->IsUint8Array()) {
             v8::Local<v8::Uint8Array> view = val.As<v8::Uint8Array>();
+            if (view->Buffer()->IsDetached()) {
+                p_isolate->ThrowException(v8::Exception::TypeError(
+                    v8::String::NewFromUtf8Literal(p_isolate, "dictionary ArrayBuffer is detached")));
+                return;
+            }
             uint8_t* p_data = static_cast<uint8_t*>(view->Buffer()->GetBackingStore()->Data()) + view->ByteOffset();
             dictionary.assign(p_data, p_data + view->ByteLength());
         } else {
             v8::Local<v8::ArrayBuffer> ab = val.As<v8::ArrayBuffer>();
+            if (ab->IsDetached()) {
+                p_isolate->ThrowException(v8::Exception::TypeError(
+                    v8::String::NewFromUtf8Literal(p_isolate, "dictionary ArrayBuffer is detached")));
+                return;
+            }
             uint8_t* p_data = static_cast<uint8_t*>(ab->GetBackingStore()->Data());
             dictionary.assign(p_data, p_data + ab->ByteLength());
         }
