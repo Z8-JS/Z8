@@ -7,6 +7,7 @@
 #include <trantor/net/EventLoopThread.h>
 #include <trantor/net/TcpConnection.h>
 #include <trantor/utils/Logger.h>
+#include <atomic>
 
 //https://github.com/Zane-JS/Zane-HTTPParser
 #include <http_parser.hpp> 
@@ -17,6 +18,18 @@ namespace zane {
 namespace builtin {
 
 std::atomic<int32_t> Server::m_active_server_count{0};
+
+// Issue #9: cap concurrent connections to bound FD and memory use.
+// Trantor doesn't expose a built-in max-connection setting, so we
+// track the count ourselves and close any connection beyond the cap.
+// 10k is generous for a single-process JS runtime and well below the
+// default Linux ulimit of 1024 fd * 10. We do NOT install a per-
+// connection high-water-mark callback here because Trantor's public
+// API doesn't expose disableReading(); the per-connection write buffer
+// is still bounded by the response size which is already capped by
+// the parser's kMaxBodySize.
+static constexpr size_t kMaxConnections = 10000;
+static std::atomic<size_t> g_active_connections{0};
 
 // State carried into Promise resolve/reject callbacks. Held in a
 // FunctionTemplate's Data, so the callbacks (which must be capture-less) can
@@ -210,8 +223,22 @@ auto Server::hasActiveServers() -> bool {
 
 void Server::onConnection(const std::shared_ptr<trantor::TcpConnection>& p_conn) {
     if (p_conn->connected()) {
-        LOG_INFO << "New connection";
+        // Issue #9: enforce the connection cap. If we've already reached
+        // kMaxConnections, drop the new one immediately rather than
+        // adding to the FD set / memory.
+        if (g_active_connections.load() >= kMaxConnections) {
+            LOG_WARN << "Rejecting connection: at cap (" << kMaxConnections << ")";
+            p_conn->forceClose();
+            return;
+        }
+        g_active_connections.fetch_add(1);
+        LOG_INFO << "New connection (" << g_active_connections.load() << " active)";
     } else {
+        // Decrement after the connection fully closes. forceClose() and
+        // the loop thread both go through this path.
+        if (g_active_connections.load() > 0) {
+            g_active_connections.fetch_sub(1);
+        }
         LOG_INFO << "Connection closed";
     }
 }
