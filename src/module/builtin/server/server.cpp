@@ -157,23 +157,80 @@ bool Server::start(uint16_t port, const std::string& hostname, RequestHandler ha
             // connection's event loop, which is the only thread that
             // should touch the buffer.
             auto p_conn_sp = p_conn;  // shared_ptr<TcpConnection> is already shared
-            auto* p_res = new Response(
-                [p_conn_sp](int32_t status, const std::map<std::string, std::string>& headers,
-                          const std::vector<uint8_t>& body) {
-                    std::string http_resp = zane::http::buildResponse(
-                        status, "OK", headers, body.data(), body.size());
-                    if (!p_conn_sp->connected()) return;
-                    auto* p_loop = p_conn_sp->getLoop();
-                    // Capture the data by value so the lambda owns the
-                    // response bytes; the raw pointer into http_resp is
-                    // stable until the lambda returns.
-                    std::string resp_copy = std::move(http_resp);
-                    p_loop->runInLoop([p_conn_sp, resp_copy = std::move(resp_copy)]() {
+            auto* p_loop_for_res = p_conn->getLoop();
+
+            // One-shot send callback (legacy). Used when the app calls
+            // res.send(body) directly — we build a complete HTTP response
+            // (with Content-Length) and hand it off in a single write.
+            auto send_cb = [p_conn_sp, p_loop_for_res](
+                              int32_t status, const std::map<std::string, std::string>& headers,
+                              const std::vector<uint8_t>& body) {
+                std::string http_resp = zane::http::buildResponse(
+                    status, "OK", headers, body.data(), body.size());
+                if (!p_conn_sp->connected()) return;
+                // Capture the data by value so the lambda owns the
+                // response bytes; the raw pointer into http_resp is
+                // stable until the lambda returns.
+                std::string resp_copy = std::move(http_resp);
+                p_loop_for_res->runInLoop(
+                    [p_conn_sp, resp_copy = std::move(resp_copy)]() {
                         if (p_conn_sp->connected()) {
                             p_conn_sp->send(resp_copy.data(), resp_copy.size());
                         }
                     });
-                }
+            };
+
+            // Streaming writeHead callback. Flushes status line + headers
+            // (with chunked framing by default) immediately, then the
+            // response stays open for writeChunk / endChunked calls.
+            auto write_head_cb = [p_conn_sp, p_loop_for_res](
+                                     int32_t status,
+                                     const std::map<std::string, std::string>& headers) {
+                if (!p_conn_sp->connected()) return;
+                std::string head = zane::http::buildResponseHead(status, "OK", headers);
+                p_loop_for_res->runInLoop(
+                    [p_conn_sp, head = std::move(head)]() {
+                        if (p_conn_sp->connected()) {
+                            p_conn_sp->send(head.data(), head.size());
+                        }
+                    });
+            };
+
+            // Streaming writeChunk callback. Frames the bytes as a single
+            // chunked-encoding frame (<hex-size>\r\n<data>\r\n) and writes
+            // it. Empty chunks are rejected by buildChunk() and become no-ops.
+            auto write_chunk_cb = [p_conn_sp, p_loop_for_res](
+                                      const std::vector<uint8_t>& chunk) {
+                if (chunk.empty()) return;
+                if (!p_conn_sp->connected()) return;
+                std::string framed = zane::http::buildChunk(chunk.data(), chunk.size());
+                if (framed.empty()) return;
+                p_loop_for_res->runInLoop(
+                    [p_conn_sp, framed = std::move(framed)]() {
+                        if (p_conn_sp->connected()) {
+                            p_conn_sp->send(framed.data(), framed.size());
+                        }
+                    });
+            };
+
+            // Streaming end callback. Emits the chunked terminator
+            // "0\r\n\r\n" so the client knows the body is complete.
+            auto end_chunked_cb = [p_conn_sp, p_loop_for_res]() {
+                if (!p_conn_sp->connected()) return;
+                std::string term = zane::http::buildChunkEnd();
+                p_loop_for_res->runInLoop(
+                    [p_conn_sp, term = std::move(term)]() {
+                        if (p_conn_sp->connected()) {
+                            p_conn_sp->send(term.data(), term.size());
+                        }
+                    });
+            };
+
+            auto* p_res = new Response(
+                std::move(send_cb),
+                std::move(write_head_cb),
+                std::move(write_chunk_cb),
+                std::move(end_chunked_cb)
             );
 
             if (handler) {
