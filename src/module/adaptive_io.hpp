@@ -5,9 +5,22 @@
 #include <cstdio>
 #include <mutex>
 #include <functional>
+#include <atomic>
+
+#ifdef _WIN32
+#include <io.h>
+#define ZANE_ISATTY _isatty
+#define ZANE_FILENO _fileno
+#else
+#include <unistd.h>
+#define ZANE_ISATTY isatty
+#define ZANE_FILENO fileno
+#endif
 
 namespace zane {
 namespace module {
+
+inline std::atomic<bool> g_adaptive_io_enabled{true};
 
 /**
  * AdaptiveIO provides a mechanism to balance between low-latency and high-throughput.
@@ -22,11 +35,33 @@ public:
           m_last_burst_flush(std::chrono::steady_clock::now()) {}
 
     /**
+     * Enables or disables Adaptive I/O globally.
+     * When disabled, reverts standard streams to default C/C++ buffering rules:
+     * - Line-buffered (_IOLBF) if connected to a terminal (isatty).
+     * - Full-buffered (_IOFBF, 8 KB) if connected to a file/pipe.
+     */
+    static void setEnabled(bool enabled) {
+        g_adaptive_io_enabled.store(enabled, std::memory_order_relaxed);
+        setupBuffer(stdout);
+        setupBuffer(stderr);
+    }
+
+    static bool isEnabled() {
+        return g_adaptive_io_enabled.load(std::memory_order_relaxed);
+    }
+
+    /**
      * Decisions whether the I/O should be flushed based on current burst frequency.
+     * If Adaptive I/O is disabled globally, always flushes immediately.
      * @param flush A callback function that performs the actual flush/syscall.
      */
     template<typename FlushFunc>
     void apply(FlushFunc&& flush) {
+        if (!g_adaptive_io_enabled.load(std::memory_order_relaxed)) {
+            flush();
+            return;
+        }
+
         std::lock_guard<std::mutex> lock(m_mutex);
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_last_flush).count();
@@ -70,11 +105,22 @@ public:
     }
 
     /**
-     * Configures a stream to use Zane's optimized 64KB full buffering.
+     * Configures a stream's buffering based on global Adaptive I/O setting:
+     * - Enabled: Zane's optimized 64KB full buffering.
+     * - Disabled: Standard C/C++ buffering (line-buffered if tty, 8KB full-buffered if file/pipe).
      */
     static void setupBuffer(FILE* p_stream, size_t size = 64 * 1024) {
-        if (p_stream) {
+        if (!p_stream) return;
+
+        if (g_adaptive_io_enabled.load(std::memory_order_relaxed)) {
             std::setvbuf(p_stream, nullptr, _IOFBF, static_cast<int>(size));
+        } else {
+            int32_t fd = ZANE_FILENO(p_stream);
+            if (fd >= 0 && ZANE_ISATTY(fd)) {
+                std::setvbuf(p_stream, nullptr, _IOLBF, BUFSIZ);
+            } else {
+                std::setvbuf(p_stream, nullptr, _IOFBF, 8 * 1024);
+            }
         }
     }
 

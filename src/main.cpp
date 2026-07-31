@@ -26,6 +26,7 @@
 // Environment interface
 #include "module/console.hpp"
 #include "module/timer.hpp"
+#include "module/adaptive_io.hpp"
 
 // Interface for the node.js module
 #include "module/node/buffer/buffer.hpp"
@@ -953,9 +954,37 @@ int main(int argc, char* argv[]) {
     SetConsoleCP(CP_UTF8);
 #endif
 
-    if (argc < 2) {
+    // Check environment variable ZANE_NO_ADAPTIVE_IO
+    const char* p_env_no_adaptive = std::getenv("ZANE_NO_ADAPTIVE_IO");
+    if (p_env_no_adaptive && (std::string(p_env_no_adaptive) == "1" || std::string(p_env_no_adaptive) == "true")) {
+        zane::module::AdaptiveIO::setEnabled(false);
+    }
+
+    // Parse CLI options and find position of target script
+    int32_t script_arg_idx = 1;
+    for (int32_t i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--no-adaptive-io") {
+            zane::module::AdaptiveIO::setEnabled(false);
+        } else if (script_arg_idx == i) {
+            script_arg_idx = i;
+            break;
+        }
+    }
+
+    // Filter out options to find the actual script or command
+    std::vector<char*> filtered_argv;
+    filtered_argv.push_back(argv[0]);
+    for (int32_t i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--no-adaptive-io") continue;
+        filtered_argv.push_back(argv[i]);
+    }
+    int32_t filtered_argc = static_cast<int32_t>(filtered_argv.size());
+
+    if (filtered_argc < 2) {
         zane::Runtime::Initialize(argv[0]);
-        zane::module::Process::setArgv(argc, argv);
+        zane::module::Process::setArgv(filtered_argc, filtered_argv.data());
         {
             zane::Runtime rt;
             rt.RunREPL();
@@ -967,23 +996,23 @@ int main(int argc, char* argv[]) {
     fs::path filename;
     std::string source;
 
-    if (std::string(argv[1]) == "-e" && argc > 2) {
+    if (std::string(filtered_argv[1]) == "-e" && filtered_argc > 2) {
         filename = "eval";
-        source = argv[2];
+        source = filtered_argv[2];
     } else {
         // Use ReadValidatedFile which validates and reads in one safe step
-        auto [content, error] = ReadValidatedFile(argv[1]);
+        auto [content, error] = ReadValidatedFile(filtered_argv[1]);
         if (!error.empty()) {
-            std::cerr << "✖ Error: " << error << ": " << argv[1] << std::endl;
+            std::cerr << "✖ Error: " << error << ": " << filtered_argv[1] << std::endl;
             return 1;
         }
 
-        filename = argv[1];
+        filename = filtered_argv[1];
         source = content;
     }
 
     zane::Runtime::Initialize(argv[0]);
-    zane::module::Process::setArgv(argc, argv);
+    zane::module::Process::setArgv(filtered_argc, filtered_argv.data());
     bool success = false;
     {
         zane::Runtime rt;
