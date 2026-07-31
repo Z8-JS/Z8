@@ -126,6 +126,8 @@ class Response {
     // JS methods
     static void sendMethod(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void sendJsonMethod(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void jsonMethod(const v8::FunctionCallbackInfo<v8::Value>& args);
+    static void statusMethod(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void endMethod(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void writeHeadMethod(const v8::FunctionCallbackInfo<v8::Value>& args);
     static void writeMethod(const v8::FunctionCallbackInfo<v8::Value>& args);

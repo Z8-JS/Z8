@@ -9,6 +9,10 @@
 #include <trantor/utils/Logger.h>
 #include <atomic>
 
+#ifdef _WIN32
+#include <openssl/ssl.h>
+#endif
+
 //https://github.com/Zane-JS/Zane-HTTPParser
 #include <http_parser.hpp> 
 #include <cstring>
@@ -86,7 +90,14 @@ Server::~Server() {
     stop();
 }
 
-bool Server::start(uint16_t port, const std::string& hostname, RequestHandler handler) {
+bool Server::start(
+    uint16_t port, 
+    const std::string& hostname, 
+    RequestHandler handler, 
+    bool use_tls, 
+    const std::string& cert_path, 
+    const std::string& key_path
+) {
     if (m_running) return false;
 
     // Create event loop thread (loop runs on background thread)
@@ -112,6 +123,10 @@ bool Server::start(uint16_t port, const std::string& hostname, RequestHandler ha
     // tight enough that a slowloris attacker can't keep many sockets alive.
     up_tcp_server->kickoffIdleConnections(30);
 
+    if (use_tls) {
+        up_tcp_server->enableSSL(cert_path, key_path);
+    }
+
     // Set connection callback
     up_tcp_server->setConnectionCallback([this](const trantor::TcpConnectionPtr& p_conn) {
         this->onConnection(p_conn);
@@ -120,6 +135,17 @@ bool Server::start(uint16_t port, const std::string& hostname, RequestHandler ha
     // Set message callback — use custom HTTP parser instead of llhttp
     up_tcp_server->setRecvMessageCallback(
         [this, handler = std::move(handler)](const trantor::TcpConnectionPtr& p_conn, trantor::MsgBuffer* p_msg) {
+            if (use_tls) {
+                if (p_conn->getCustomContext().has_value()) {
+                    auto context = std::any_cast<SSL*>(p_conn->getCustomContext());
+                    if (SSL_is_init_finished(context)) {
+                        // Continue with parsing
+                    }
+                } else {
+                    return; // SSL handshake not finished
+                }
+            }
+
             zane::http::Parser parser;
 
             const char* p_data = p_msg->peek();
@@ -367,6 +393,19 @@ void Server::serveCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
         error_fn = error_val.As<v8::Function>();
     }
 
+    // Parse TLS options
+    std::string key_path, cert_path;
+    v8::Local<v8::Value> key_val, cert_val;
+    if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "key")).ToLocal(&key_val) && key_val->IsString()) {
+        v8::String::Utf8Value utf8(p_isolate, key_val);
+        if (*utf8) key_path = *utf8;
+    }
+    if (options->Get(context, v8::String::NewFromUtf8Literal(p_isolate, "cert")).ToLocal(&cert_val) && cert_val->IsString()) {
+        v8::String::Utf8Value utf8(p_isolate, cert_val);
+        if (*utf8) cert_path = *utf8;
+    }
+    const bool use_tls = !key_path.empty() && !cert_path.empty();
+
     // Create persistent handles for callbacks and context
     auto p_fetch_global = std::make_shared<v8::Global<v8::Function>>(p_isolate, fetch_fn);
     std::shared_ptr<v8::Global<v8::Function>> p_error_global;
@@ -467,7 +506,7 @@ void Server::serveCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
     // Start server
     auto* p_server = new Server();
-    bool started = p_server->start(port, hostname, std::move(handler));
+    bool started = p_server->start(port, hostname, std::move(handler), use_tls, cert_path, key_path);
 
     if (!started) {
         delete p_server;

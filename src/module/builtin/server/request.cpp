@@ -5,6 +5,49 @@ namespace builtin {
 
 v8::Persistent<v8::ObjectTemplate> Request::m_template;
 
+#include <urldecode.h>
+
+void Request::parseBody(v8::Isolate* p_isolate, v8::Local<v8::Context> context) {
+    if (!m_parsed_body.IsEmpty()) return; // Already parsed
+
+    auto it = m_headers.find("content-type");
+    if (it == m_headers.end() || m_body.empty()) {
+        m_parsed_body.Reset(p_isolate, v8::Null(p_isolate));
+        return;
+    }
+
+    std::string content_type = it->second;
+    v8::Local<v8::Value> parsed;
+
+    if (content_type.find("application/json") != std::string::npos) {
+        parsed = json(p_isolate, context);
+    } else if (content_type.find("application/x-www-form-urlencoded") != std::string::npos) {
+        std::string body_str(reinterpret_cast<const char*>(m_body.data()), m_body.size());
+        v8::Local<v8::Object> obj = v8::Object::New(p_isolate);
+
+        size_t start = 0;
+        while (start < body_str.length()) {
+            size_t end = body_str.find('&', start);
+            if (end == std::string::npos) {
+                end = body_str.length();
+            }
+            std::string pair_str = body_str.substr(start, end - start);
+            size_t eq_pos = pair_str.find('=');
+            if (eq_pos != std::string::npos) {
+                std::string key = url_decode(pair_str.substr(0, eq_pos));
+                std::string val = url_decode(pair_str.substr(eq_pos + 1));
+                obj->Set(context, v8::String::NewFromUtf8(p_isolate, key.c_str()).ToLocalChecked(), v8::String::NewFromUtf8(p_isolate, val.c_str()).ToLocalChecked()).Check();
+            }
+            start = end + 1;
+        }
+        parsed = obj;
+    } else {
+        parsed = v8::Null(p_isolate);
+    }
+
+    m_parsed_body.Reset(p_isolate, parsed);
+}
+
 Request::Request(std::string method, std::string path, std::map<std::string, std::string> headers,
                  std::vector<uint8_t> body)
     : m_method(std::move(method)), m_path(std::move(path)), m_headers(std::move(headers)), m_body(std::move(body)) {
@@ -47,6 +90,7 @@ v8::Local<v8::ObjectTemplate> Request::createTemplate(v8::Isolate* p_isolate) {
     tpl->SetNativeDataProperty(v8::String::NewFromUtf8Literal(p_isolate, "url"), getUrl);
     tpl->SetNativeDataProperty(v8::String::NewFromUtf8Literal(p_isolate, "pathname"), getPathname);
     tpl->SetNativeDataProperty(v8::String::NewFromUtf8Literal(p_isolate, "headers"), getHeaders);
+    tpl->SetNativeDataProperty(v8::String::NewFromUtf8Literal(p_isolate, "body"), getBody);
 
     // Methods
     tpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "json"),
@@ -130,6 +174,23 @@ void Request::getHeaders(v8::Local<v8::Name> property, const v8::PropertyCallbac
     }
 
     info.GetReturnValue().Set(headers_obj);
+}
+
+void Request::getBody(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info) {
+    (void)property;
+    Request* p_req = unwrap(info.HolderV2());
+    if (!p_req) return;
+
+    v8::Isolate* p_isolate = info.GetIsolate();
+    v8::Local<v8::Context> context = p_isolate->GetCurrentContext();
+    
+    p_req->parseBody(p_isolate, context);
+    
+    if (p_req->m_parsed_body.IsEmpty()) {
+        info.GetReturnValue().Set(v8::Null(p_isolate));
+    } else {
+        info.GetReturnValue().Set(p_req->m_parsed_body.Get(p_isolate));
+    }
 }
 
 // Methods

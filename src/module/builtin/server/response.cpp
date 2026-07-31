@@ -210,7 +210,9 @@ v8::Local<v8::ObjectTemplate> Response::createTemplate(v8::Isolate* p_isolate) {
     tpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "send"),
              v8::FunctionTemplate::New(p_isolate, sendMethod));
     tpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "json"),
-             v8::FunctionTemplate::New(p_isolate, sendJsonMethod));
+             v8::FunctionTemplate::New(p_isolate, jsonMethod));
+    tpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "status"),
+             v8::FunctionTemplate::New(p_isolate, statusMethod));
     tpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "end"),
              v8::FunctionTemplate::New(p_isolate, endMethod));
     tpl->Set(v8::String::NewFromUtf8Literal(p_isolate, "setHeader"),
@@ -312,11 +314,22 @@ void Response::sendMethod(const v8::FunctionCallbackInfo<v8::Value>& args) {
     }
 }
 
-void Response::sendJsonMethod(const v8::FunctionCallbackInfo<v8::Value>& args) {
+void Response::jsonMethod(const v8::FunctionCallbackInfo<v8::Value>& args) {
     Response* p_res = unwrap(args.This());
     if (!p_res || p_res->m_has_ended || args.Length() < 1) return;
 
     p_res->sendJson(args.GetIsolate(), args[0]);
+}
+
+void Response::statusMethod(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    Response* p_res = unwrap(args.This());
+    if (!p_res || args.Length() < 1 || !args[0]->IsNumber()) {
+        args.GetReturnValue().Set(args.This());
+        return;
+    }
+    
+    p_res->setStatus(args[0]->Int32Value(args.GetIsolate()->GetCurrentContext()).FromMaybe(200));
+    args.GetReturnValue().Set(args.This());
 }
 
 void Response::endMethod(const v8::FunctionCallbackInfo<v8::Value>& args) {

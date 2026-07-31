@@ -36,11 +36,16 @@ class Request {
   private:
     // V8 weak callback — frees the C++ Request when the JS wrapper is GC'd.
     static void weakCallback(const v8::WeakCallbackInfo<Request>& data);
+
+    // Body parsing
+    void parseBody(v8::Isolate* p_isolate, v8::Local<v8::Context> context);
+
     std::string m_method;
     std::string m_path;
     std::string m_pathname; // Parsed path (before ?)
     std::map<std::string, std::string> m_headers;
     std::vector<uint8_t> m_body;
+    v8::Global<v8::Value> m_parsed_body; // Cached parsed body (JSON, form-data)
 
     // Internal V8 template (cached)
     static v8::Persistent<v8::ObjectTemplate> m_template;
@@ -50,6 +55,7 @@ class Request {
     static void getUrl(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info);
     static void getPathname(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info);
     static void getHeaders(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info);
+    static void getBody(v8::Local<v8::Name> property, const v8::PropertyCallbackInfo<v8::Value>& info);
 
     // JS methods
     static void jsonMethod(const v8::FunctionCallbackInfo<v8::Value>& args);
