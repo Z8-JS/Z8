@@ -39,8 +39,7 @@ class Server {
         RequestHandler handler,
         bool use_tls,
         const std::string& cert_path,
-        const std::string& key_path
-    );
+        const std::string& key_path);
 
     // Stop server
     void stop(std::function<void()> on_stop = nullptr);
