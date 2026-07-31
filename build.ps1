@@ -224,8 +224,39 @@ if ($IsWindows -or (-not $IsMacOS)) {
 
 # 3.5: Trantor (Networking Library)
 if (-not (Test-Path "deps/trantor_install/lib/trantor.lib")) {
-    Write-Host "Trantor libraries not found. Running build_trantor.ps1..." -ForegroundColor Yellow
-    & .\build_trantor.ps1 -Config $Config
+    Write-Host "Trantor libraries not found. Building Trantor..." -ForegroundColor Yellow
+    $trantorBuild = "deps/trantor/build"
+    if (-not (Test-Path $trantorBuild)) {
+        New-Item -ItemType Directory -Path $trantorBuild | Out-Null
+    }
+    Push-Location $trantorBuild
+    try {
+        $cmakeArgs = @(
+            "..",
+            "-G", "NMake Makefiles",
+            "-DCMAKE_BUILD_TYPE=$Config",
+            "-DCMAKE_INSTALL_PREFIX=../../trantor_install",
+            "-DBUILD_TESTING=OFF",
+            "-DCMAKE_CXX_STANDARD=17",
+            "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+            "-DCMAKE_C_FLAGS_RELEASE=/MT",
+            "-DCMAKE_CXX_FLAGS_RELEASE=/MT",
+            "-DCMAKE_C_FLAGS_DEBUG=/MTd",
+            "-DCMAKE_CXX_FLAGS_DEBUG=/MTd"
+        )
+        # Optional: Add OpenSSL path if available
+        if (Test-Path "../../deps/openssl_install") {
+            $cmakeArgs += "-DOPENSSL_ROOT_DIR=../../deps/openssl_install"
+        } else {
+            Write-Warning "OpenSSL not found in deps/openssl_install. HTTPS might be disabled."
+        }
+        & cmake $cmakeArgs
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+        & cmake --build . --config $Config --target install
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+    } finally {
+        Pop-Location
+    }
 }
 
 # 3.6: Zane Core

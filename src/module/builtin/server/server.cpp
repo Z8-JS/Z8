@@ -9,10 +9,6 @@
 #include <trantor/utils/Logger.h>
 #include <atomic>
 
-#ifdef _WIN32
-#include <openssl/ssl.h>
-#endif
-
 //https://github.com/Zane-JS/Zane-HTTPParser
 #include <http_parser.hpp> 
 #include <cstring>
@@ -134,14 +130,13 @@ bool Server::start(
 
     // Set message callback — use custom HTTP parser instead of llhttp
     up_tcp_server->setRecvMessageCallback(
-        [this, handler = std::move(handler)](const trantor::TcpConnectionPtr& p_conn, trantor::MsgBuffer* p_msg) {
+        [this, use_tls, handler = std::move(handler)](const trantor::TcpConnectionPtr& p_conn, trantor::MsgBuffer* p_msg) {
             if (use_tls) {
-                if (p_conn->getCustomContext().has_value()) {
-                    auto context = std::any_cast<SSL*>(p_conn->getCustomContext());
-                    if (SSL_is_init_finished(context)) {
-                        // Continue with parsing
-                    }
-                } else {
+                // Only parse data once TLS is active on this connection.
+                // Trantor delivers only decrypted data to this callback once
+                // its TLS provider exists; without an SSL-enabled Trantor
+                // build there is no provider, so drop the data.
+                if (!p_conn->isSSLConnection()) {
                     return; // SSL handshake not finished
                 }
             }
