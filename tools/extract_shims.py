@@ -1,7 +1,7 @@
 import re
 import os
 
-lib_path = 'libs/v8_monolith.lib'
+lib_path = 'V8/out.gn/x64.release/obj/v8_monolith.lib'
 
 if not os.path.exists(lib_path):
     print(f"Warning: {lib_path} not found. Please place your V8 monolith library there.")

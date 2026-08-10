@@ -44,8 +44,7 @@ libs/
 ├── http/                        # Zane-HTTPParser (git submodule)
 └── deps/                        # Third-party (zlib, brotli, zstd, trantor)
 tools/
-├── build.ps1                    # Incremental build script
-└── check_style.py               # C++ coding style checker
+├── check_style.py               # C++ coding style checker
 docs/
 └── SERVER_MODULE.md             # Builtin server architecture
 ```
@@ -58,18 +57,32 @@ docs/
 
 ## Building
 
+Builds are managed with **CMake** (top-level `CMakeLists.txt`): missing
+dependencies are auto-downloaded into `deps/` (no more `tools/setup.py`),
+`zlib`/`brotli`/`zstd` are compiled in-tree, and `trantor`/`jsoncpp`/`drogon`
+are built & installed into `deps/*_install` on first use.
+
 Open **Developer PowerShell for Visual Studio** and run:
 
 ```powershell
-.\build.ps1
+.\build.ps1              # Release build (first run configures CMake)
+.\build.ps1 -Config Debug
+.\build.ps1 -Clean       # wipe the build/ directory first
 ```
 
-The resulting `zane.exe` will be created in the root directory.
+or invoke CMake directly:
+
+```powershell
+cmake -S . -B build -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+```
+
+The resulting `zane.exe` will be created in `build\bin\`.
 
 ## Running
 
 ```powershell
-.\zane.exe main.js
+.\build\bin\zane.exe main.js
 ```
 
 ## Example: HTTP Server
